@@ -124,6 +124,12 @@ public partial class MainViewModel : ViewModelBase
     private StateStepViewModel? _connectionSourceStep;
 
     [ObservableProperty]
+    private ZoneViewModel? _connectionSourceZone;
+
+    [ObservableProperty]
+    private PinSide _connectionSourceSide = PinSide.Right;
+
+    [ObservableProperty]
     private double _connectionDragEndX;
 
     [ObservableProperty]
@@ -134,6 +140,12 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private StateStepViewModel? _connectionHoverStep;
+
+    [ObservableProperty]
+    private ZoneViewModel? _connectionHoverZone;
+
+    [ObservableProperty]
+    private PinSide _connectionHoverSide;
 
     [ObservableProperty]
     private ToolboxItemViewModel? _selectedToolboxItem;
@@ -547,45 +559,115 @@ public partial class MainViewModel : ViewModelBase
         // Kept for command binding compatibility; connections are created by dragging pins on the canvas.
     }
 
-    public void StartConnectionDrag(StateBoxViewModel box, StateStepViewModel? step, double endX, double endY)
+    public void StartConnectionDrag(
+        StateBoxViewModel box, StateStepViewModel? step, PinSide side, double endX, double endY)
+    {
+        StartConnectionDragCore(box, step, zone: null, side, endX, endY);
+    }
+
+    public void StartConnectionDragFromZone(ZoneViewModel zone, PinSide side, double endX, double endY)
+    {
+        if (!ZoneFlow.IsOutputSide(side))
+            return;
+
+        var exitBox = zone.GetExitBox();
+        StartConnectionDragCore(exitBox, step: null, zone, side, endX, endY);
+    }
+
+    private void StartConnectionDragCore(
+        StateBoxViewModel? box, StateStepViewModel? step, ZoneViewModel? zone,
+        PinSide side, double endX, double endY)
     {
         IsConnecting = true;
         ConnectionSourceBox = box;
         ConnectionSourceStep = step;
+        ConnectionSourceZone = zone;
+        ConnectionSourceSide = side;
         ConnectionDragEndX = endX;
         ConnectionDragEndY = endY;
         ConnectionHoverBox = null;
         ConnectionHoverStep = null;
+        ConnectionHoverZone = null;
+        ConnectionHoverSide = PinSide.Left;
         StatusText = "Drag to an input pin";
         NotifyGraphChanged();
     }
 
-    public void UpdateConnectionDrag(double endX, double endY, StateBoxViewModel? hoverBox, StateStepViewModel? hoverStep)
+    public void UpdateConnectionDrag(
+        double endX, double endY,
+        StateBoxViewModel? hoverBox, StateStepViewModel? hoverStep, PinSide hoverSide,
+        ZoneViewModel? hoverZone = null)
     {
         ConnectionDragEndX = endX;
         ConnectionDragEndY = endY;
         ConnectionHoverBox = hoverBox;
         ConnectionHoverStep = hoverStep;
+        ConnectionHoverZone = hoverZone;
+        ConnectionHoverSide = hoverSide;
         NotifyGraphChanged();
     }
 
-    public bool TryCompleteConnectionDrag(StateBoxViewModel targetBox, StateStepViewModel? targetStep)
+    public bool TryCompleteConnectionDrag(
+        StateBoxViewModel targetBox, StateStepViewModel? targetStep, PinSide targetSide)
     {
-        if (!IsConnecting || ConnectionSourceBox is null)
+        return TryCompleteConnectionDragCore(targetBox, targetStep, targetZone: null, targetSide);
+    }
+
+    public bool TryCompleteConnectionDragToZone(ZoneViewModel targetZone, PinSide targetSide)
+    {
+        if (!ZoneFlow.IsInputSide(targetSide))
             return false;
 
-        if (ConnectionSourceBox == targetBox && ConnectionSourceStep == targetStep)
+        return TryCompleteConnectionDragCore(
+            targetZone.GetEnterBox(), targetStep: null, targetZone, targetSide);
+    }
+
+    private bool TryCompleteConnectionDragCore(
+        StateBoxViewModel? targetBox, StateStepViewModel? targetStep,
+        ZoneViewModel? targetZone, PinSide targetSide)
+    {
+        if (!IsConnecting)
+            return false;
+
+        // Zone-only endpoints are allowed (empty zone); box-less non-zone endpoints are not.
+        if (ConnectionSourceZone is null && ConnectionSourceBox is null)
+            return false;
+        if (targetZone is null && targetBox is null)
+            return false;
+
+        if (ConnectionSourceZone is null
+            && targetZone is null
+            && ConnectionSourceBox == targetBox
+            && ConnectionSourceStep == targetStep)
         {
             CancelConnection();
             return false;
         }
 
+        if (ConnectionSourceZone is not null && targetZone is not null
+            && ConnectionSourceZone.Id == targetZone.Id)
+        {
+            CancelConnection();
+            return false;
+        }
+
+        var sourceStepId = ConnectionSourceZone is not null
+            ? (ConnectionSourceBox is null ? null : ResolveExitStepId(ConnectionSourceBox))
+            : ConnectionSourceStep?.Id;
+        var targetStepId = targetZone is not null
+            ? (targetBox is null ? null : ResolveEnterStepId(targetBox))
+            : targetStep?.Id;
+
         var connection = new StateConnection
         {
-            SourceBoxId = ConnectionSourceBox.Id,
-            SourceStepId = ConnectionSourceStep?.Id,
-            TargetBoxId = targetBox.Id,
-            TargetStepId = targetStep?.Id
+            SourceBoxId = ConnectionSourceBox?.Id ?? string.Empty,
+            SourceStepId = sourceStepId,
+            SourceZoneId = ConnectionSourceZone?.Id,
+            SourceSide = ConnectionSourceSide,
+            TargetBoxId = targetBox?.Id ?? string.Empty,
+            TargetStepId = targetStepId,
+            TargetZoneId = targetZone?.Id,
+            TargetSide = targetSide
         };
 
         var vm = new ConnectionViewModel(connection, this);
@@ -608,9 +690,15 @@ public partial class MainViewModel : ViewModelBase
         return true;
     }
 
-    public void TryCompleteConnection(StateBoxViewModel targetBox, StateStepViewModel? targetStep = null)
+    private static string? ResolveEnterStepId(StateBoxViewModel box) =>
+        box.Steps.FirstOrDefault()?.Id;
+
+    private static string? ResolveExitStepId(StateBoxViewModel box) =>
+        box.Steps.Count > 0 ? box.Steps[^1].Id : null;
+
+    public void TryCompleteConnection(StateBoxViewModel targetBox, StateStepViewModel? targetStep = null, PinSide targetSide = PinSide.Left)
     {
-        TryCompleteConnectionDrag(targetBox, targetStep);
+        TryCompleteConnectionDrag(targetBox, targetStep, targetSide);
     }
 
     [RelayCommand]
@@ -619,8 +707,12 @@ public partial class MainViewModel : ViewModelBase
         IsConnecting = false;
         ConnectionSourceBox = null;
         ConnectionSourceStep = null;
+        ConnectionSourceZone = null;
+        ConnectionSourceSide = PinSide.Right;
         ConnectionHoverBox = null;
         ConnectionHoverStep = null;
+        ConnectionHoverZone = null;
+        ConnectionHoverSide = PinSide.Left;
         StatusText = "Ready";
         NotifyGraphChanged();
     }

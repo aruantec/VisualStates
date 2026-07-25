@@ -1,3 +1,4 @@
+using VisualStates.Core;
 using VisualStates.Core.Models;
 
 namespace VisualStates.Runtime;
@@ -55,13 +56,44 @@ internal static class ExecutionPlanner
 
         foreach (var connection in project.Connections)
         {
-            var source = RuntimeStepKey.From(project, connection.SourceBoxId, connection.SourceStepId);
-            var target = RuntimeStepKey.From(project, connection.TargetBoxId, connection.TargetStepId);
-            if (!stepMap.ContainsKey(source) || !stepMap.ContainsKey(target) || source.Equals(target))
+            var source = ResolveConnectionSource(project, connection);
+            var target = ResolveConnectionTarget(project, connection);
+            if (source is null || target is null
+                || !stepMap.ContainsKey(source.Value) || !stepMap.ContainsKey(target.Value)
+                || source.Value.Equals(target.Value))
                 continue;
 
-            adjacency[source].Add(target);
-            incoming[target]++;
+            adjacency[source.Value].Add(target.Value);
+            incoming[target.Value]++;
+        }
+
+        foreach (var zone in project.Zones)
+        {
+            var children = ZoneFlow.GetOrderedChildren(project, zone.Id);
+            foreach (var child in children)
+            {
+                for (var s = 0; s < child.Steps.Count - 1; s++)
+                {
+                    var from = new RuntimeStepKey(child.Id, child.Steps[s].Id);
+                    var to = new RuntimeStepKey(child.Id, child.Steps[s + 1].Id);
+                    if (!stepMap.ContainsKey(from) || !stepMap.ContainsKey(to) || from.Equals(to))
+                        continue;
+
+                    adjacency[from].Add(to);
+                    incoming[to]++;
+                }
+            }
+
+            for (var i = 0; i < children.Count - 1; i++)
+            {
+                var from = BoxExitKey(children[i]);
+                var to = BoxEnterKey(children[i + 1]);
+                if (!stepMap.ContainsKey(from) || !stepMap.ContainsKey(to) || from.Equals(to))
+                    continue;
+
+                adjacency[from].Add(to);
+                incoming[to]++;
+            }
         }
 
         var queue = new Queue<RuntimeStepKey>(
@@ -101,6 +133,38 @@ internal static class ExecutionPlanner
 
         return ordered;
     }
+
+    private static RuntimeStepKey? ResolveConnectionSource(StateProject project, StateConnection connection)
+    {
+        if (!string.IsNullOrWhiteSpace(connection.SourceZoneId))
+        {
+            var exit = ZoneFlow.ResolveExit(project, connection.SourceZoneId);
+            return exit is null ? null : new RuntimeStepKey(exit.Value.BoxId, exit.Value.StepId);
+        }
+
+        return RuntimeStepKey.From(project, connection.SourceBoxId, connection.SourceStepId);
+    }
+
+    private static RuntimeStepKey? ResolveConnectionTarget(StateProject project, StateConnection connection)
+    {
+        if (!string.IsNullOrWhiteSpace(connection.TargetZoneId))
+        {
+            var enter = ZoneFlow.ResolveEnter(project, connection.TargetZoneId);
+            return enter is null ? null : new RuntimeStepKey(enter.Value.BoxId, enter.Value.StepId);
+        }
+
+        return RuntimeStepKey.From(project, connection.TargetBoxId, connection.TargetStepId);
+    }
+
+    private static RuntimeStepKey BoxEnterKey(StateBox box) =>
+        box.Steps.Count > 0
+            ? new RuntimeStepKey(box.Id, box.Steps[0].Id)
+            : new RuntimeStepKey(box.Id, null);
+
+    private static RuntimeStepKey BoxExitKey(StateBox box) =>
+        box.Steps.Count > 0
+            ? new RuntimeStepKey(box.Id, box.Steps[^1].Id)
+            : new RuntimeStepKey(box.Id, null);
 }
 
 internal readonly record struct RuntimeStepKey(string BoxId, string? StepId)

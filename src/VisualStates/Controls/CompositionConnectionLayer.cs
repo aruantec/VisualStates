@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
+using VisualStates.Core.Models;
 using VisualStates.ViewModels;
 
 namespace VisualStates.Controls;
@@ -173,6 +174,9 @@ public class CompositionConnectionLayer : Control
             or nameof(MainViewModel.IsConnecting)
             or nameof(MainViewModel.ConnectionDragEndX)
             or nameof(MainViewModel.ConnectionDragEndY)
+            or nameof(MainViewModel.ConnectionSourceZone)
+            or nameof(MainViewModel.ConnectionHoverZone)
+            or nameof(MainViewModel.ConnectionHoverSide)
             or nameof(MainViewModel.SelectedConnection))
         {
             InvalidateVisual();
@@ -186,34 +190,65 @@ public class CompositionConnectionLayer : Control
             return;
 
         var zoom = ViewModel.Zoom;
+        var paths = ConnectionRenderHelper.BuildAllConnectionPaths(ViewModel);
         using (context.PushTransform(new Matrix(zoom, 0, 0, zoom, ViewModel.PanX, ViewModel.PanY)))
         {
             for (var i = 0; i < ViewModel.Connections.Count; i++)
-                DrawAnimatedConnection(context, ViewModel.Connections[i], i);
+                DrawAnimatedConnection(context, ViewModel.Connections[i], paths[i]);
 
-            if (ViewModel.IsConnecting && ViewModel.ConnectionSourceBox is not null)
+            if (ViewModel.IsConnecting
+                && (ViewModel.ConnectionSourceBox is not null || ViewModel.ConnectionSourceZone is not null))
                 DrawDragPreview(context);
         }
     }
 
     private void DrawDragPreview(DrawingContext context)
     {
-        var source = ViewModel!.ConnectionSourceBox!;
-        var (x1, y1) = ConnectionRenderHelper.GetPinPosition(source, ViewModel.ConnectionSourceStep, isOutput: true);
+        var sourceSide = ViewModel!.ConnectionSourceSide;
+        double x1, y1;
+        if (ViewModel.ConnectionSourceZone is not null)
+        {
+            (x1, y1) = ViewModel.ConnectionSourceZone.GetPinPosition(sourceSide);
+        }
+        else
+        {
+            var source = ViewModel.ConnectionSourceBox!;
+            (x1, y1) = ConnectionRenderHelper.GetPinPosition(source, ViewModel.ConnectionSourceStep, sourceSide);
+        }
+
         var x2 = ViewModel.ConnectionDragEndX;
         var y2 = ViewModel.ConnectionDragEndY;
-        var geometry = ConnectionRenderHelper.CreateRoutedGeometry(x1, y1, x2, y2);
 
         var wirePen = CreateRoundPen(Color.FromArgb(180, 120, 190, 255), 2.5);
         wirePen.DashStyle = DashStyle.Dash;
+
+        var hoverZone = ViewModel.ConnectionHoverZone;
+        var hoverBox = ViewModel.ConnectionHoverBox;
+        var hoverSide = ViewModel.ConnectionHoverSide;
+        var targetSide = hoverZone is not null || hoverBox is not null
+            ? hoverSide
+            : InferDragTargetSide(sourceSide, x2, y2, x1, y1);
+
+        // Rubber-band Bezier (not orthogonal stubs) so near-pin drags stay clean.
+        var geometry = ConnectionRenderHelper.CreateDragPreviewGeometry(
+            x1, y1, sourceSide, x2, y2, targetSide);
+
         context.DrawGeometry(null, wirePen, geometry);
     }
 
-    private void DrawAnimatedConnection(DrawingContext context, ConnectionViewModel connection, int routeIndex)
+    private static PinSide InferDragTargetSide(
+        PinSide sourceSide, double x2, double y2, double x1, double y1)
     {
-        var (x1, y1) = connection.GetSourcePoint();
-        var (x2, y2) = connection.GetTargetPoint();
-        var geometry = ConnectionRenderHelper.CreateRoutedGeometry(x1, y1, x2, y2, routeIndex);
+        if (sourceSide is PinSide.Top or PinSide.Bottom)
+            return y2 < y1 ? PinSide.Bottom : PinSide.Top;
+
+        return x2 < x1 ? PinSide.Right : PinSide.Left;
+    }
+
+    private void DrawAnimatedConnection(
+        DrawingContext context, ConnectionViewModel connection, IReadOnlyList<Point> points)
+    {
+        var geometry = ConnectionRenderHelper.CreateRoutedGeometry(points);
 
         var wireColor = connection.IsSelected
             ? Color.FromRgb(255, 140, 0)
@@ -227,7 +262,7 @@ public class CompositionConnectionLayer : Control
         else
             DrawInnerGlowFlow(context, geometry, wireWidth, selected: false);
 
-        var routePoint = ConnectionRenderHelper.GetRoutePoint(x1, y1, x2, y2, routeIndex);
+        var routePoint = ConnectionRenderHelper.GetRoutePoint(points);
         var markerColor = connection.IsSelected
             ? Color.FromRgb(255, 140, 0)
             : Color.FromRgb(220, 220, 220);

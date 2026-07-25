@@ -182,6 +182,40 @@ public partial class StateBoxViewModel : ViewModelBase
         return (x, y);
     }
 
+    public (double X, double Y) GetStepPinPosition(StateStepViewModel? step, PinSide side)
+    {
+        const double headerHeight = 34;
+        const double stepHeight = 42;
+        const double padding = 12;
+
+        var index = step is null ? -1 : Steps.IndexOf(step);
+        var rowY = Y + headerHeight + padding + Math.Max(0, index) * stepHeight + stepHeight / 2;
+        return PositionForSide(side, rowY, headerHeight + padding + stepHeight / 2);
+    }
+
+    public (double X, double Y) GetBoxPinPosition(PinSide side)
+    {
+        var rowY = Y + 34;
+        return PositionForSide(side, rowY, 34);
+    }
+
+    private (double X, double Y) PositionForSide(PinSide side, double rowY, double fallbackTopOffset)
+    {
+        switch (side)
+        {
+            case PinSide.Left:
+                return (X, rowY);
+            case PinSide.Right:
+                return (X + Width, rowY);
+            case PinSide.Top:
+                return (X + Width / 2, Y + 1);
+            case PinSide.Bottom:
+                return (X + Width / 2, Y + GetTotalHeight() - 1);
+            default:
+                return (X, rowY);
+        }
+    }
+
     public double GetTotalHeight() =>
         34 + Math.Max(1, Steps.Count) * 42 + 24;
 }

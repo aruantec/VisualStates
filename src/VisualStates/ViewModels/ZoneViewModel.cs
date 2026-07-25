@@ -168,4 +168,36 @@ public partial class ZoneViewModel : ViewModelBase
 
     public IEnumerable<StateBoxViewModel> GetChildBoxes() =>
         Main.Boxes.Where(box => box.ZoneId == Id);
+
+    /// <summary>
+    /// Children in visual reading order: top-to-bottom, then left-to-right.
+    /// First = zone enter (Left/Top); last = zone exit (Right/Bottom).
+    /// </summary>
+    public IReadOnlyList<StateBoxViewModel> GetOrderedChildBoxes() =>
+        GetChildBoxes()
+            .OrderBy(box => box.Y)
+            .ThenBy(box => box.X)
+            .ToList();
+
+    public StateBoxViewModel? GetEnterBox() =>
+        GetOrderedChildBoxes().FirstOrDefault();
+
+    public StateBoxViewModel? GetExitBox()
+    {
+        var children = GetOrderedChildBoxes();
+        return children.Count == 0 ? null : children[^1];
+    }
+
+    public (double X, double Y) GetPinPosition(PinSide side)
+    {
+        var body = BodyRect;
+        return side switch
+        {
+            PinSide.Left => (body.Left, body.Top + body.Height / 2),
+            PinSide.Right => (body.Right, body.Top + body.Height / 2),
+            PinSide.Top => (body.Left + body.Width / 2, body.Top),
+            PinSide.Bottom => (body.Left + body.Width / 2, body.Bottom),
+            _ => (body.Left, body.Top + body.Height / 2)
+        };
+    }
 }
