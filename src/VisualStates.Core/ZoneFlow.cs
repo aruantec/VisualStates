@@ -37,5 +37,6 @@ public static class ZoneFlow
 
     public static bool IsInputSide(PinSide side) => side is PinSide.Left or PinSide.Top;
 
-    public static bool IsOutputSide(PinSide side) => side is PinSide.Right or PinSide.Bottom;
+    public static bool IsOutputSide(PinSide side) =>
+        side is PinSide.Right or PinSide.Bottom or PinSide.Error;
 }

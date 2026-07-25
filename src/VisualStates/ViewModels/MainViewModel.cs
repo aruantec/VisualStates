@@ -412,7 +412,11 @@ public partial class MainViewModel : ViewModelBase
                 return;
 
             SelectedBox.ZoneId = newId;
+            if (newId is not null)
+                RemoveErrorConnectionsFromBox(SelectedBox);
+
             RefreshSelectedZoneChildren();
+            NotifyGraphChanged();
             _projectService.MarkDirty();
             UpdateTitle();
             OnPropertyChanged();
@@ -589,7 +593,9 @@ public partial class MainViewModel : ViewModelBase
         ConnectionHoverStep = null;
         ConnectionHoverZone = null;
         ConnectionHoverSide = PinSide.Left;
-        StatusText = "Drag to an input pin";
+        StatusText = side == PinSide.Error
+            ? "Drag error / exit pin to a handler state"
+            : "Drag to an input pin";
         NotifyGraphChanged();
     }
 
@@ -667,7 +673,8 @@ public partial class MainViewModel : ViewModelBase
             TargetBoxId = targetBox?.Id ?? string.Empty,
             TargetStepId = targetStepId,
             TargetZoneId = targetZone?.Id,
-            TargetSide = targetSide
+            TargetSide = targetSide,
+            IsError = ConnectionSourceSide == PinSide.Error
         };
 
         var vm = new ConnectionViewModel(connection, this);
@@ -766,11 +773,34 @@ public partial class MainViewModel : ViewModelBase
         }
 
         box.ZoneId = newZoneId;
+
+        // Zone owns error handling for its children — drop per-element error wires.
+        if (newZoneId is not null)
+            RemoveErrorConnectionsFromBox(box);
+
         ZoneDropTarget = null;
         RefreshSelectedZoneChildren();
         NotifyGraphChanged();
         _projectService.MarkDirty();
         UpdateTitle();
+    }
+
+    private void RemoveErrorConnectionsFromBox(StateBoxViewModel box)
+    {
+        var stepIds = box.Steps.Select(s => s.Id).ToHashSet();
+        var toRemove = Connections
+            .Where(c =>
+                c.IsError
+                && string.IsNullOrWhiteSpace(c.Model.SourceZoneId)
+                && c.Model.SourceBoxId == box.Id
+                && (c.Model.SourceStepId is null || stepIds.Contains(c.Model.SourceStepId)))
+            .ToList();
+
+        foreach (var connection in toRemove)
+        {
+            _projectService.Current.Connections.Remove(connection.Model);
+            Connections.Remove(connection);
+        }
     }
 
     public ZoneViewModel? FindZoneAtBodyPoint(double x, double y)

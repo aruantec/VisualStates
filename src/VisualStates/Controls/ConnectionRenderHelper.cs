@@ -121,7 +121,7 @@ internal static class ConnectionRenderHelper
         var offset = Math.Min(StubLength, dist * 0.35);
         var srcDir = SignOf(sourceSide);
         var tgtDir = SignOf(targetSide);
-        var sourceHorizontal = sourceSide is PinSide.Left or PinSide.Right;
+        var sourceHorizontal = sourceSide is PinSide.Left or PinSide.Right or PinSide.Error;
 
         var p0 = new Point(x1, y1);
         var p3 = new Point(x2, y2);
@@ -210,8 +210,8 @@ internal static class ConnectionRenderHelper
         obstacles ??= [];
         reservedVerticalLanes ??= [];
         reservedHorizontalLanes ??= [];
-        var sourceHorizontal = sourceSide is PinSide.Left or PinSide.Right;
-        var targetHorizontal = targetSide is PinSide.Left or PinSide.Right;
+        var sourceHorizontal = sourceSide is PinSide.Left or PinSide.Right or PinSide.Error;
+        var targetHorizontal = targetSide is PinSide.Left or PinSide.Right or PinSide.Error;
 
         if (sourceHorizontal && targetHorizontal)
         {
@@ -247,7 +247,7 @@ internal static class ConnectionRenderHelper
 
     private static int SignOf(PinSide side) => side switch
     {
-        PinSide.Right or PinSide.Bottom => +1,
+        PinSide.Right or PinSide.Bottom or PinSide.Error => +1,
         PinSide.Left or PinSide.Top => -1,
         _ => 0
     };
@@ -276,8 +276,8 @@ internal static class ConnectionRenderHelper
 
     private static bool NeedsOrthogonalHorizontal(double x1, PinSide sourceSide, double x2, PinSide targetSide)
     {
-        var sourceForward = sourceSide == PinSide.Right;
-        var targetForward = targetSide == PinSide.Right;
+        var sourceForward = sourceSide is PinSide.Right or PinSide.Error;
+        var targetForward = targetSide is PinSide.Right or PinSide.Error;
         if (sourceForward && targetForward)
             return x2 < x1 - BackwardThreshold;
         if (!sourceForward && !targetForward)
@@ -511,7 +511,7 @@ internal static class ConnectionRenderHelper
     {
         var srcDir = SignOf(sourceSide);
         var tgtDir = SignOf(targetSide);
-        var sourceHorizontal = sourceSide is PinSide.Left or PinSide.Right;
+        var sourceHorizontal = sourceSide is PinSide.Left or PinSide.Right or PinSide.Error;
 
         if (sourceHorizontal)
         {

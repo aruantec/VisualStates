@@ -27,6 +27,7 @@ public partial class ConnectionViewModel : ViewModelBase
 
     public PinSide SourceSide => Model.SourceSide;
     public PinSide TargetSide => Model.TargetSide;
+    public bool IsError => Model.IsError || Model.SourceSide == PinSide.Error;
 
     [ObservableProperty]
     private bool _isSelected;

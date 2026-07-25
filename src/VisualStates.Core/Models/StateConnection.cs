@@ -11,4 +11,10 @@ public sealed class StateConnection
     public string? TargetStepId { get; set; }
     public string? TargetZoneId { get; set; }
     public PinSide TargetSide { get; set; } = PinSide.Left;
+
+    /// <summary>
+    /// When true, this wire is an error/exit branch (from an Error pin),
+    /// not part of the happy-path execution order.
+    /// </summary>
+    public bool IsError { get; set; }
 }

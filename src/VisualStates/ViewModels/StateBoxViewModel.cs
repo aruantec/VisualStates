@@ -184,37 +184,51 @@ public partial class StateBoxViewModel : ViewModelBase
 
     public (double X, double Y) GetStepPinPosition(StateStepViewModel? step, PinSide side)
     {
+        if (side == PinSide.Error && step is not null)
+            return GetStepErrorPinPosition(step);
+
         const double headerHeight = 34;
         const double stepHeight = 42;
         const double padding = 12;
 
         var index = step is null ? -1 : Steps.IndexOf(step);
         var rowY = Y + headerHeight + padding + Math.Max(0, index) * stepHeight + stepHeight / 2;
-        return PositionForSide(side, rowY, headerHeight + padding + stepHeight / 2);
+        return PositionForSide(side, rowY);
     }
 
     public (double X, double Y) GetBoxPinPosition(PinSide side)
     {
+        if (side == PinSide.Error)
+            return GetBoxErrorPinPosition();
+
         var rowY = Y + 34;
-        return PositionForSide(side, rowY, 34);
+        return PositionForSide(side, rowY);
     }
 
-    private (double X, double Y) PositionForSide(PinSide side, double rowY, double fallbackTopOffset)
-    {
-        switch (side)
+    private (double X, double Y) PositionForSide(PinSide side, double rowY) =>
+        side switch
         {
-            case PinSide.Left:
-                return (X, rowY);
-            case PinSide.Right:
-                return (X + Width, rowY);
-            case PinSide.Top:
-                return (X + Width / 2, Y + 1);
-            case PinSide.Bottom:
-                return (X + Width / 2, Y + GetTotalHeight() - 1);
-            default:
-                return (X, rowY);
-        }
+            PinSide.Left => (X, rowY),
+            PinSide.Right => (X + Width, rowY),
+            PinSide.Top => (X + Width / 2, Y + 1),
+            PinSide.Bottom => (X + Width / 2, Y + GetTotalHeight() - 1),
+            _ => (X, rowY)
+        };
+
+    public (double X, double Y) GetStepErrorPinPosition(StateStepViewModel step)
+    {
+        const double headerHeight = 34;
+        const double stepHeight = 42;
+        const double padding = 12;
+        const double stepInset = 10;
+
+        var index = Math.Max(0, Steps.IndexOf(step));
+        var stepTop = Y + headerHeight + padding + index * stepHeight;
+        return (X + Width - stepInset, stepTop);
     }
+
+    public (double X, double Y) GetBoxErrorPinPosition() =>
+        (X + Width - 2, Y + 2);
 
     public double GetTotalHeight() =>
         34 + Math.Max(1, Steps.Count) * 42 + 24;

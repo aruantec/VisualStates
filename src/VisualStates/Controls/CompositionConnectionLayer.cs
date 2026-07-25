@@ -242,6 +242,7 @@ public class CompositionConnectionLayer : Control
         if (sourceSide is PinSide.Top or PinSide.Bottom)
             return y2 < y1 ? PinSide.Bottom : PinSide.Top;
 
+        // Error pins leave toward the right like a normal output.
         return x2 < x1 ? PinSide.Right : PinSide.Left;
     }
 
@@ -252,7 +253,9 @@ public class CompositionConnectionLayer : Control
 
         var wireColor = connection.IsSelected
             ? Color.FromRgb(255, 140, 0)
-            : Color.FromRgb(220, 220, 220);
+            : connection.IsError
+                ? Color.FromRgb(220, 70, 70)
+                : Color.FromRgb(220, 220, 220);
         var wireWidth = connection.IsSelected ? 3.0 : 2.5;
 
         context.DrawGeometry(null, CreateRoundPen(wireColor, wireWidth), geometry);

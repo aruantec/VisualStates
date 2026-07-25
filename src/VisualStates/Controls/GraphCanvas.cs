@@ -492,12 +492,41 @@ public class GraphCanvas : Control
         }
 
         UpdateZoneHoverCursor(e.GetCurrentPoint(this).Position);
+        UpdateErrorPinTooltip(ScreenToGraph(e.GetCurrentPoint(this).Position));
     }
 
     protected override void OnPointerExited(PointerEventArgs e)
     {
         base.OnPointerExited(e);
         ResetCursor();
+        ToolTip.SetTip(this, null);
+    }
+
+    private const string ErrorPinTooltip =
+        "Error / exit — on failure, continue to the connected handler state";
+
+    private const string ZoneErrorPinTooltip =
+        "Zone error / exit — any failure inside this zone follows this path";
+
+    private static bool ShowsOwnErrorPin(StateBoxViewModel box) =>
+        string.IsNullOrWhiteSpace(box.ZoneId);
+
+    private void UpdateErrorPinTooltip(Point graphPoint)
+    {
+        if (_isPanning || _isDraggingConnection || _dragBox is not null || _dragZone is not null || _resizeZone is not null)
+        {
+            ToolTip.SetTip(this, null);
+            return;
+        }
+
+        var pin = HitTestPin(graphPoint, inputOnly: false, outputOnly: false);
+        if (pin is not { Side: PinSide.Error })
+        {
+            ToolTip.SetTip(this, null);
+            return;
+        }
+
+        ToolTip.SetTip(this, pin.Value.Zone is not null ? ZoneErrorPinTooltip : ErrorPinTooltip);
     }
 
     private void UpdateZoneHoverCursor(Point screenPoint)
@@ -727,6 +756,7 @@ public class GraphCanvas : Control
         DrawPin(context, zone.GetPinPosition(PinSide.Right), PinSide.Right, IsZonePinHighlighted(zone, PinSide.Right));
         DrawPin(context, zone.GetPinPosition(PinSide.Top), PinSide.Top, IsZonePinHighlighted(zone, PinSide.Top));
         DrawPin(context, zone.GetPinPosition(PinSide.Bottom), PinSide.Bottom, IsZonePinHighlighted(zone, PinSide.Bottom));
+        DrawPin(context, zone.GetPinPosition(PinSide.Error), PinSide.Error, IsZonePinHighlighted(zone, PinSide.Error));
 
         if (isSelected)
             DrawZoneResizeHandles(context, bodyRect, ViewModel!.Zoom);
@@ -893,6 +923,8 @@ public class GraphCanvas : Control
         DrawPin(context, box.GetBoxPinPosition(PinSide.Right), PinSide.Right, IsPinHighlighted(box, null, PinSide.Right));
         DrawPin(context, box.GetBoxPinPosition(PinSide.Top), PinSide.Top, IsPinHighlighted(box, null, PinSide.Top));
         DrawPin(context, box.GetBoxPinPosition(PinSide.Bottom), PinSide.Bottom, IsPinHighlighted(box, null, PinSide.Bottom));
+        if (ShowsOwnErrorPin(box))
+            DrawPin(context, box.GetBoxErrorPinPosition(), PinSide.Error, IsPinHighlighted(box, null, PinSide.Error));
     }
 
     private void DrawStep(DrawingContext context, StateBoxViewModel box, StateStepViewModel step, double y)
@@ -951,6 +983,8 @@ public class GraphCanvas : Control
         DrawPin(context, box.GetStepPinPosition(step, PinSide.Right), PinSide.Right, IsPinHighlighted(box, step, PinSide.Right));
         DrawPin(context, box.GetStepPinPosition(step, PinSide.Top), PinSide.Top, IsPinHighlighted(box, step, PinSide.Top));
         DrawPin(context, box.GetStepPinPosition(step, PinSide.Bottom), PinSide.Bottom, IsPinHighlighted(box, step, PinSide.Bottom));
+        if (ShowsOwnErrorPin(box))
+            DrawPin(context, box.GetStepErrorPinPosition(step), PinSide.Error, IsPinHighlighted(box, step, PinSide.Error));
     }
 
     private static Rect GetStepRect(StateBoxViewModel box, double y) =>
@@ -961,7 +995,7 @@ public class GraphCanvas : Control
         if (ViewModel is null || !ViewModel.IsConnecting)
             return false;
 
-        var isOutput = side is PinSide.Right or PinSide.Bottom;
+        var isOutput = side is PinSide.Right or PinSide.Bottom or PinSide.Error;
         if (isOutput)
         {
             return ViewModel.ConnectionSourceZone is null
@@ -981,7 +1015,7 @@ public class GraphCanvas : Control
         if (ViewModel is null || !ViewModel.IsConnecting)
             return false;
 
-        var isOutput = side is PinSide.Right or PinSide.Bottom;
+        var isOutput = side is PinSide.Right or PinSide.Bottom or PinSide.Error;
         if (isOutput)
             return ViewModel.ConnectionSourceZone == zone && ViewModel.ConnectionSourceSide == side;
 
@@ -990,14 +1024,30 @@ public class GraphCanvas : Control
 
     private static void DrawPin(DrawingContext context, (double X, double Y) point, PinSide side, bool isHighlighted)
     {
-        var isOutput = side is PinSide.Right or PinSide.Bottom;
-        var fill = isHighlighted
-            ? Color.FromRgb(255, 140, 0)
-            : isOutput ? Color.FromRgb(240, 240, 240) : Color.FromRgb(200, 200, 200);
-        var radius = isHighlighted ? 7.5 : 6;
+        var isOutput = side is PinSide.Right or PinSide.Bottom or PinSide.Error;
+        var isError = side == PinSide.Error;
+        Color fill;
+        Color stroke;
+        if (isHighlighted)
+        {
+            fill = Color.FromRgb(255, 140, 0);
+            stroke = Color.FromRgb(255, 200, 120);
+        }
+        else if (isError)
+        {
+            fill = Color.FromRgb(220, 55, 55);
+            stroke = Color.FromRgb(90, 20, 20);
+        }
+        else
+        {
+            fill = isOutput ? Color.FromRgb(240, 240, 240) : Color.FromRgb(200, 200, 200);
+            stroke = Color.FromRgb(30, 30, 30);
+        }
+
+        var radius = isHighlighted ? 7.5 : isError ? 6.5 : 6;
         context.DrawEllipse(
             new SolidColorBrush(fill),
-            new Pen(new SolidColorBrush(isHighlighted ? Color.FromRgb(255, 200, 120) : Color.FromRgb(30, 30, 30)), isHighlighted ? 2 : 1),
+            new Pen(new SolidColorBrush(stroke), isHighlighted || isError ? 2 : 1),
             new Point(point.X, point.Y),
             radius,
             radius);
@@ -1038,6 +1088,13 @@ public class GraphCanvas : Control
             {
                 if (!inputOnly)
                 {
+                    if (ShowsOwnErrorPin(box))
+                    {
+                        var error = box.GetStepErrorPinPosition(step);
+                        if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, error.X, error.Y))
+                            return new GraphPin(box, Zone: null, step, IsOutput: true, Side: PinSide.Error);
+                    }
+
                     var right = box.GetStepPinPosition(step, PinSide.Right);
                     if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, right.X, right.Y))
                         return new GraphPin(box, Zone: null, step, IsOutput: true, Side: PinSide.Right);
@@ -1061,6 +1118,13 @@ public class GraphCanvas : Control
 
             if (!inputOnly)
             {
+                if (ShowsOwnErrorPin(box))
+                {
+                    var boxError = box.GetBoxErrorPinPosition();
+                    if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxError.X, boxError.Y))
+                        return new GraphPin(box, Zone: null, null, IsOutput: true, Side: PinSide.Error);
+                }
+
                 var boxRight = box.GetBoxPinPosition(PinSide.Right);
                 if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxRight.X, boxRight.Y))
                     return new GraphPin(box, Zone: null, null, IsOutput: true, Side: PinSide.Right);
@@ -1087,6 +1151,10 @@ public class GraphCanvas : Control
             var zone = ViewModel.Zones[i];
             if (!inputOnly)
             {
+                var error = zone.GetPinPosition(PinSide.Error);
+                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, error.X, error.Y))
+                    return new GraphPin(Box: null, zone, Step: null, IsOutput: true, Side: PinSide.Error);
+
                 var right = zone.GetPinPosition(PinSide.Right);
                 if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, right.X, right.Y))
                     return new GraphPin(Box: null, zone, Step: null, IsOutput: true, Side: PinSide.Right);

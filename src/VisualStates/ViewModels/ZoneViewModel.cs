@@ -197,6 +197,7 @@ public partial class ZoneViewModel : ViewModelBase
             PinSide.Right => (body.Right, body.Top + body.Height / 2),
             PinSide.Top => (body.Left + body.Width / 2, body.Top),
             PinSide.Bottom => (body.Left + body.Width / 2, body.Bottom),
+            PinSide.Error => (body.Right - 4, body.Top + 4),
             _ => (body.Left, body.Top + body.Height / 2)
         };
     }

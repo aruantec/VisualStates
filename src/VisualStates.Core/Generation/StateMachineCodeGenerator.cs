@@ -56,7 +56,8 @@ public sealed class StateMachineCodeGenerator
 
         foreach (var node in order)
         {
-            sb.AppendLine($"        await {methodNames[node]}(context, cancellationToken);");
+            sb.AppendLine($"        if (!await {methodNames[node]}(context, cancellationToken))");
+            sb.AppendLine("            return;");
         }
     }
 
@@ -68,54 +69,163 @@ public sealed class StateMachineCodeGenerator
             foreach (var step in box.Steps)
             {
                 var node = new ExecutionNode(box.Id, step.Id);
-                AppendStepMethod(sb, project, box, step, methodNames[node]);
+                AppendStepMethod(sb, project, box, step, methodNames[node], methodNames);
             }
 
             if (box.Steps.Count == 0)
             {
                 var node = new ExecutionNode(box.Id, null);
-                AppendEmptyBoxMethod(sb, box, methodNames[node]);
+                AppendEmptyBoxMethod(sb, project, box, methodNames[node], methodNames);
             }
         }
     }
 
     private static void AppendStepMethod(
-        StringBuilder sb, StateProject project, StateBox box, StateStep step, string methodName)
+        StringBuilder sb,
+        StateProject project,
+        StateBox box,
+        StateStep step,
+        string methodName,
+        IReadOnlyDictionary<ExecutionNode, string> methodNames)
     {
-        sb.AppendLine($"    private async Task {methodName}(IStateMachineContext context, CancellationToken cancellationToken)");
+        var errorHandler = FindErrorHandlerMethod(project, box, step, methodNames);
+        sb.AppendLine($"    private async Task<bool> {methodName}(IStateMachineContext context, CancellationToken cancellationToken)");
         sb.AppendLine("    {");
         sb.AppendLine($"        // {box.Name} / {step.Name}");
+        if (errorHandler is not null)
+        {
+            sb.AppendLine("        try");
+            sb.AppendLine("        {");
+        }
+
+        var indent = errorHandler is not null ? "            " : "        ";
         switch (step.Kind)
         {
             case StepKind.SetVariable:
                 var variable = step.TargetName ?? "Variable";
                 var expression = step.Expression ?? "null";
-                sb.AppendLine($"        {SanitizeIdentifier(variable)} = {expression};");
-                sb.AppendLine("        await Task.CompletedTask;");
+                sb.AppendLine($"{indent}{SanitizeIdentifier(variable)} = {expression};");
+                sb.AppendLine($"{indent}await Task.CompletedTask;");
                 break;
             case StepKind.CallEvent:
                 var eventName = step.EventName ?? step.TargetName ?? "OnEvent";
-                sb.AppendLine($"        await context.RaiseEventAsync(\"{eventName}\", cancellationToken);");
+                sb.AppendLine($"{indent}await context.RaiseEventAsync(\"{eventName}\", cancellationToken);");
                 break;
             case StepKind.CallMethod:
                 var method = step.MethodName ?? step.TargetName ?? "Execute";
                 var args = string.IsNullOrWhiteSpace(step.Arguments) ? string.Empty : $", {step.Arguments}";
-                sb.AppendLine($"        await context.InvokeMethodAsync(\"{method}\"{args}, cancellationToken);");
+                sb.AppendLine($"{indent}await context.InvokeMethodAsync(\"{method}\"{args}, cancellationToken);");
                 break;
         }
+
+        if (errorHandler is not null)
+        {
+            sb.AppendLine($"{indent}return true;");
+            sb.AppendLine("        }");
+            sb.AppendLine("        catch (Exception)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            await {errorHandler}(context, cancellationToken);");
+            sb.AppendLine("            return false;");
+            sb.AppendLine("        }");
+        }
+        else
+        {
+            sb.AppendLine("        return true;");
+        }
+
         sb.AppendLine("    }");
         sb.AppendLine();
     }
 
-    private static void AppendEmptyBoxMethod(StringBuilder sb, StateBox box, string methodName)
+    private static void AppendEmptyBoxMethod(
+        StringBuilder sb,
+        StateProject project,
+        StateBox box,
+        string methodName,
+        IReadOnlyDictionary<ExecutionNode, string> methodNames)
     {
-        sb.AppendLine($"    private async Task {methodName}(IStateMachineContext context, CancellationToken cancellationToken)");
+        var errorHandler = FindErrorHandlerMethod(project, box, step: null, methodNames);
+        sb.AppendLine($"    private async Task<bool> {methodName}(IStateMachineContext context, CancellationToken cancellationToken)");
         sb.AppendLine("    {");
         sb.AppendLine($"        // {box.Name}");
-        sb.AppendLine("        await Task.CompletedTask;");
+        if (errorHandler is not null)
+        {
+            sb.AppendLine("        try");
+            sb.AppendLine("        {");
+            sb.AppendLine("            await Task.CompletedTask;");
+            sb.AppendLine("            return true;");
+            sb.AppendLine("        }");
+            sb.AppendLine("        catch (Exception)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            await {errorHandler}(context, cancellationToken);");
+            sb.AppendLine("            return false;");
+            sb.AppendLine("        }");
+        }
+        else
+        {
+            sb.AppendLine("        await Task.CompletedTask;");
+            sb.AppendLine("        return true;");
+        }
+
         sb.AppendLine("    }");
         sb.AppendLine();
     }
+
+    private static string? FindErrorHandlerMethod(
+        StateProject project,
+        StateBox box,
+        StateStep? step,
+        IReadOnlyDictionary<ExecutionNode, string> methodNames)
+    {
+        var target = FindErrorTarget(project, box, step);
+        if (target is null)
+            return null;
+
+        return methodNames.TryGetValue(target.Value, out var name) ? name : null;
+    }
+
+    private static ExecutionNode? FindErrorTarget(StateProject project, StateBox box, StateStep? step)
+    {
+        // Inside a zone: only the zone's shared error pin applies.
+        if (!string.IsNullOrWhiteSpace(box.ZoneId))
+        {
+            foreach (var connection in project.Connections)
+            {
+                if (!IsErrorConnection(connection))
+                    continue;
+                if (connection.SourceZoneId != box.ZoneId)
+                    continue;
+                return ExecutionOrderBuilder.ResolveTargetNode(project, connection);
+            }
+
+            return null;
+        }
+
+        // Outside a zone: step-specific error pin, then box-level fallback.
+        StateConnection? boxFallback = null;
+        foreach (var connection in project.Connections)
+        {
+            if (!IsErrorConnection(connection))
+                continue;
+            if (!string.IsNullOrWhiteSpace(connection.SourceZoneId))
+                continue;
+            if (connection.SourceBoxId != box.Id)
+                continue;
+
+            if (step is not null && connection.SourceStepId == step.Id)
+                return ExecutionOrderBuilder.ResolveTargetNode(project, connection);
+
+            if (string.IsNullOrWhiteSpace(connection.SourceStepId))
+                boxFallback ??= connection;
+        }
+
+        return boxFallback is null
+            ? null
+            : ExecutionOrderBuilder.ResolveTargetNode(project, boxFallback);
+    }
+
+    private static bool IsErrorConnection(StateConnection connection) =>
+        connection.IsError || connection.SourceSide == PinSide.Error;
 
     private static Dictionary<ExecutionNode, string> BuildMethodNames(StateProject project)
     {
@@ -265,6 +375,9 @@ internal static class ExecutionOrderBuilder
 
         foreach (var connection in project.Connections)
         {
+            if (connection.IsError || connection.SourceSide == PinSide.Error)
+                continue;
+
             var source = ResolveConnectionSource(project, connection);
             var target = ResolveConnectionTarget(project, connection);
             if (source is null || target is null)
@@ -362,6 +475,9 @@ internal static class ExecutionOrderBuilder
 
         return ToNode(project, connection.TargetBoxId, connection.TargetStepId);
     }
+
+    public static ExecutionNode? ResolveTargetNode(StateProject project, StateConnection connection) =>
+        ResolveConnectionTarget(project, connection);
 
     private static ExecutionNode BoxEnterNode(StateBox box) =>
         box.Steps.Count > 0
