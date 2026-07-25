@@ -1,0 +1,244 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:VisualStates.ViewModels"
+        xmlns:models="using:VisualStates.Core.Models"
+        xmlns:controls="using:VisualStates.Controls"
+        mc:Ignorable="d"
+        d:DesignWidth="1400"
+        d:DesignHeight="900"
+        x:Class="VisualStates.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Width="1400"
+        Height="900"
+        Background="#FF1E1E1E">
+
+  <DockPanel>
+    <Menu DockPanel.Dock="Top">
+      <MenuItem Header="_File">
+        <MenuItem Header="_New" Command="{Binding NewProjectCommand}" />
+        <MenuItem Header="_Open..." Command="{Binding OpenProjectCommand}" />
+        <MenuItem Header="_Save" Command="{Binding SaveProjectCommand}" />
+        <MenuItem Header="Save _As..." Command="{Binding SaveProjectAsCommand}" />
+        <Separator />
+        <MenuItem Header="E_xit" Click="OnExitClick" />
+      </MenuItem>
+      <MenuItem Header="_Edit">
+        <MenuItem Header="_Undo" Command="{Binding UndoCommand}" />
+        <MenuItem Header="_Redo" Command="{Binding RedoCommand}" />
+        <Separator />
+        <MenuItem Header="_Delete" Command="{Binding DeleteSelectionCommand}" />
+      </MenuItem>
+      <MenuItem Header="_Generate">
+        <MenuItem Header="Generate C#" Command="{Binding GenerateCodeCommand}" />
+      </MenuItem>
+    </Menu>
+
+    <Border DockPanel.Dock="Bottom"
+            Background="#FF2A2A2A"
+            BorderBrush="#FF3A3A3A"
+            BorderThickness="0,1,0,0"
+            Padding="10,6">
+      <TextBlock Text="{Binding StatusText}" Foreground="#FFB0B0B0" />
+    </Border>
+
+    <Grid ColumnDefinitions="220,*,320">
+      <Border Grid.Column="0"
+              Background="#FF252526"
+              BorderBrush="#FF3A3A3A"
+              BorderThickness="0,0,1,0">
+        <DockPanel Margin="12">
+          <TextBlock DockPanel.Dock="Top"
+                     Text="Toolbox"
+                     FontSize="16"
+                     FontWeight="SemiBold"
+                     Foreground="White"
+                     Margin="0,0,0,12" />
+          <ItemsControl ItemsSource="{Binding ToolboxItems}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ToolboxItemViewModel">
+                <Button Margin="0,0,0,8"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Left"
+                        Background="#FF2D2D30"
+                        BorderBrush="#FF3F3F46"
+                        Padding="10"
+                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToolboxActionCommand}"
+                        CommandParameter="{Binding}">
+                  <StackPanel Spacing="4">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock Text="{Binding Description}" FontSize="11" Foreground="#FFB0B0B0" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </DockPanel>
+      </Border>
+
+      <Grid Grid.Column="1"
+            x:Name="ViewAreaGrid"
+            Background="#FF1B1B1C"
+            ClipToBounds="True"
+            PointerPressed="OnViewAreaPointerPressed"
+            PointerMoved="OnViewAreaPointerMoved"
+            PointerReleased="OnViewAreaPointerReleased"
+            PointerWheelChanged="OnCanvasPointerWheelChanged">
+        <controls:GraphCanvas x:Name="GraphCanvas"
+                              ViewModel="{Binding}" />
+        <controls:CompositionConnectionLayer ViewModel="{Binding}"
+                                             IsHitTestVisible="False" />
+      </Grid>
+
+      <Border Grid.Column="2"
+              Background="#FF252526"
+              BorderBrush="#FF3A3A3A"
+              BorderThickness="1,0,0,0">
+        <DockPanel Margin="12">
+          <TextBlock DockPanel.Dock="Top"
+                     Text="Properties &amp; Code"
+                     FontSize="16"
+                     FontWeight="SemiBold"
+                     Foreground="White"
+                     Margin="0,0,0,12" />
+
+          <ScrollViewer>
+            <StackPanel Spacing="12">
+              <Border Background="#FF2D2D30"
+                      CornerRadius="6"
+                      Padding="10"
+                      IsVisible="{Binding SelectedBox, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="Selected Box" FontWeight="SemiBold" Foreground="White" />
+                  <TextBox Text="{Binding SelectedBox.Name}" PlaceholderText="Box name" />
+                  <CheckBox Content="Entry state" IsChecked="{Binding SelectedBox.IsEntry}" />
+                  <TextBlock Text="Zone" FontWeight="SemiBold" Foreground="White" Margin="0,4,0,0" />
+                  <ComboBox ItemsSource="{Binding Zones}"
+                            SelectedItem="{Binding SelectedBoxParentZone}"
+                            PlaceholderText="No zone">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ZoneViewModel">
+                        <TextBlock Text="{Binding Name}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <Button Content="Remove from zone"
+                          Command="{Binding RemoveBoxFromZoneCommand}"
+                          CommandParameter="{Binding SelectedBox}"
+                          HorizontalAlignment="Left"
+                          IsVisible="{Binding SelectedBox.ZoneId, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <TextBlock Text="Steps" FontWeight="SemiBold" Foreground="White" Margin="0,4,0,0" />
+                  <ItemsControl ItemsSource="{Binding SelectedBox.Steps}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:StateStepViewModel">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                          <Button Grid.Column="0"
+                                  HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Left"
+                                  Background="Transparent"
+                                  BorderThickness="0"
+                                  Padding="4,2"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectStepCommand}"
+                                  CommandParameter="{Binding}">
+                            <TextBlock Text="{Binding Name}" Foreground="#FFD8D8D8" TextTrimming="CharacterEllipsis" />
+                          </Button>
+                          <Button Grid.Column="1"
+                                  Content="✕"
+                                  ToolTip.Tip="Delete step"
+                                  Padding="8,2"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).DeleteStepItemCommand}"
+                                  CommandParameter="{Binding}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Button Content="Delete box"
+                          Command="{Binding DeleteSelectionCommand}"
+                          HorizontalAlignment="Left"
+                          IsVisible="{Binding SelectedStep, Converter={x:Static ObjectConverters.IsNull}}" />
+                </StackPanel>
+              </Border>
+
+              <Border Background="#FF2D2D30"
+                      CornerRadius="6"
+                      Padding="10"
+                      IsVisible="{Binding SelectedZone, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="Selected Zone" FontWeight="SemiBold" Foreground="White" />
+                  <TextBox Text="{Binding SelectedZone.Name}" PlaceholderText="Zone name" />
+                  <TextBlock Text="Child states" FontWeight="SemiBold" Foreground="White" Margin="0,4,0,0" />
+                  <ItemsControl ItemsSource="{Binding SelectedZoneChildBoxes}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:StateBoxViewModel">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                          <Button Grid.Column="0"
+                                  HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Left"
+                                  Background="Transparent"
+                                  BorderThickness="0"
+                                  Padding="4,2"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectBoxCommand}"
+                                  CommandParameter="{Binding}">
+                            <TextBlock Text="{Binding Name}" Foreground="#FFD8D8D8" TextTrimming="CharacterEllipsis" />
+                          </Button>
+                          <Button Grid.Column="1"
+                                  Content="Out"
+                                  ToolTip.Tip="Remove from zone"
+                                  Padding="8,2"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RemoveBoxFromZoneCommand}"
+                                  CommandParameter="{Binding}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Button Content="Add state box"
+                          Command="{Binding AddStateBoxCommand}"
+                          HorizontalAlignment="Left" />
+                  <Button Content="Delete zone"
+                          Command="{Binding DeleteZoneCommand}"
+                          HorizontalAlignment="Left" />
+                </StackPanel>
+              </Border>
+
+              <Border Background="#FF2D2D30"
+                      CornerRadius="6"
+                      Padding="10"
+                      IsVisible="{Binding SelectedStep, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="Selected Step" FontWeight="SemiBold" Foreground="White" />
+                  <TextBox Text="{Binding SelectedStep.Name}" PlaceholderText="Step name" />
+                  <ComboBox SelectedItem="{Binding SelectedStep.Kind}">
+                    <models:StepKind>SetVariable</models:StepKind>
+                    <models:StepKind>CallEvent</models:StepKind>
+                    <models:StepKind>CallMethod</models:StepKind>
+                  </ComboBox>
+                  <TextBox Text="{Binding SelectedStep.TargetName}" PlaceholderText="Target / variable" />
+                  <TextBox Text="{Binding SelectedStep.Expression}" PlaceholderText="Expression" AcceptsReturn="True" />
+                  <TextBox Text="{Binding SelectedStep.EventName}" PlaceholderText="Event name" />
+                  <TextBox Text="{Binding SelectedStep.MethodName}" PlaceholderText="Method name" />
+                  <Button Content="Delete step"
+                          Command="{Binding DeleteStepItemCommand}"
+                          CommandParameter="{Binding SelectedStep}"
+                          HorizontalAlignment="Left" />
+                </StackPanel>
+              </Border>
+
+              <Border Background="#FF2D2D30" CornerRadius="6" Padding="10">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="Generated C#" FontWeight="SemiBold" Foreground="White" />
+                  <TextBox Text="{Binding GeneratedCode}"
+                           AcceptsReturn="True"
+                           TextWrapping="Wrap"
+                           Height="360"
+                           FontFamily="Consolas,Courier New,monospace"
+                           IsReadOnly="True" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>

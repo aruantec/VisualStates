@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VisualStates.Core/VisualStates.Core.csproj" />
+    <Project Path="src/VisualStates.Runtime/VisualStates.Runtime.csproj" />
+    <Project Path="src/VisualStates/VisualStates.csproj" />
+  </Folder>
+</Solution>
