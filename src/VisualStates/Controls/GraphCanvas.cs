@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using VisualStates.Core.Models;
 using VisualStates.ViewModels;
@@ -35,7 +36,23 @@ public class GraphCanvas : Control
     private MainViewModel? _hookedViewModel;
     private bool _isDraggingConnection;
 
+    private readonly DispatcherTimer _zoomTimer;
+    private bool _zoomAnimating;
+    private double _zoomTarget = 1.0;
+    private Point _zoomAnchorScreen;
+    private Point _zoomAnchorGraph;
+    private DateTime _lastZoomTick = DateTime.UtcNow;
+
     private const double ViewClickThreshold = 4;
+
+    public GraphCanvas()
+    {
+        _zoomTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(16)
+        };
+        _zoomTimer.Tick += OnZoomAnimationTick;
+    }
 
     static GraphCanvas()
     {
@@ -69,6 +86,7 @@ public class GraphCanvas : Control
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        StopZoomAnimation();
         UnhookViewModel(_hookedViewModel);
         _hookedViewModel = null;
         base.OnDetachedFromVisualTree(e);
@@ -255,20 +273,82 @@ public class GraphCanvas : Control
 
     internal void ApplyZoomAt(Point screenPoint, double factor)
     {
+        if (ViewModel is null || Math.Abs(factor - 1.0) < 1e-6)
+            return;
+
+        BeginOrRetargetSmoothZoom(screenPoint, factor);
+    }
+
+    private void BeginOrRetargetSmoothZoom(Point screenPoint, double factor)
+    {
         if (ViewModel is null)
             return;
 
-        var (panX, panY, zoom) = GraphViewport.ZoomAt(
-            screenPoint,
+        // Keep the graph point under the cursor stable (Maps / iOS pinch feel).
+        _zoomAnchorScreen = screenPoint;
+        _zoomAnchorGraph = GraphViewport.ScreenToGraph(
+            screenPoint, ViewModel.PanX, ViewModel.PanY, ViewModel.Zoom);
+
+        // Accumulate onto the in-flight target so fast flicks feel continuous.
+        var basis = _zoomAnimating ? _zoomTarget : ViewModel.Zoom;
+        _zoomTarget = Math.Clamp(basis * factor, GraphViewport.MinZoom, GraphViewport.MaxZoom);
+
+        if (Math.Abs(_zoomTarget - ViewModel.Zoom) < 0.0002)
+            return;
+
+        if (_zoomAnimating)
+            return;
+
+        _zoomAnimating = true;
+        _lastZoomTick = DateTime.UtcNow;
+        _zoomTimer.Start();
+    }
+
+    private void OnZoomAnimationTick(object? sender, EventArgs e)
+    {
+        if (ViewModel is null)
+        {
+            StopZoomAnimation();
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var dt = Math.Min((now - _lastZoomTick).TotalSeconds, 0.05);
+        _lastZoomTick = now;
+
+        var nextZoom = GraphViewport.StepToward(ViewModel.Zoom, _zoomTarget, dt);
+        var (panX, panY, zoom) = GraphViewport.ZoomTo(
+            _zoomAnchorScreen,
+            _zoomAnchorGraph,
             ViewModel.PanX,
             ViewModel.PanY,
-            ViewModel.Zoom,
-            factor);
+            nextZoom);
 
         ViewModel.PanX = panX;
         ViewModel.PanY = panY;
         ViewModel.Zoom = zoom;
         InvalidateVisual();
+
+        if (Math.Abs(ViewModel.Zoom - _zoomTarget) < 0.0002)
+        {
+            var (finalPanX, finalPanY, finalZoom) = GraphViewport.ZoomTo(
+                _zoomAnchorScreen,
+                _zoomAnchorGraph,
+                ViewModel.PanX,
+                ViewModel.PanY,
+                _zoomTarget);
+            ViewModel.PanX = finalPanX;
+            ViewModel.PanY = finalPanY;
+            ViewModel.Zoom = finalZoom;
+            StopZoomAnimation();
+            InvalidateVisual();
+        }
+    }
+
+    private void StopZoomAnimation()
+    {
+        _zoomAnimating = false;
+        _zoomTimer.Stop();
     }
 
     private void StartViewPan(IPointer pointer, Point screenPoint)
