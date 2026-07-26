@@ -427,8 +427,10 @@ internal static class ConnectionRenderHelper
     };
 
     /// <summary>
-    /// Routes a connection between two horizontally oriented pins, preferring a Bezier when aligned
-    /// and falling back to <see cref="OrthogonalHorizontal"/> otherwise.
+    /// Routes a connection between two horizontally oriented pins, preferring a Bezier when
+    /// there is room between stubs and falling back to <see cref="OrthogonalHorizontal"/> otherwise.
+    /// Perfect Y-alignment is not required — a soft curve looks better than a Z-jog when boxes
+    /// are only slightly offset.
     /// </summary>
     private static List<Point> RouteHorizontal(
         double x1, double y1, PinSide sourceSide,
@@ -437,14 +439,10 @@ internal static class ConnectionRenderHelper
         IReadOnlyList<double> reservedVerticalLanes,
         IReadOnlyList<double> reservedHorizontalLanes)
     {
-        // Bezier only when pins are roughly level — otherwise use orthogonal
-        // corners (same style as stacked Right→Left wires like State 2 → State 3).
-        var aligned = Math.Abs(y2 - y1) < AlignThreshold;
-        if (aligned
-            && !NeedsOrthogonalHorizontal(x1, sourceSide, x2, targetSide)
+        if (!NeedsOrthogonalHorizontal(x1, sourceSide, x2, targetSide)
             && HasBezierRoomHorizontal(x1, sourceSide, x2, targetSide))
         {
-            return HorizontalBezier(x1, y1, sourceSide, x2, y2, targetSide, routeIndex);
+            return HorizontalBezier(x1, y1, sourceSide, x2, y2, targetSide);
         }
 
         return OrthogonalHorizontal(
@@ -478,8 +476,10 @@ internal static class ConnectionRenderHelper
     }
 
     /// <summary>
-    /// Routes a connection between two vertically oriented pins, preferring a Bezier when aligned
-    /// and falling back to <see cref="OrthogonalVertical"/> otherwise.
+    /// Routes a connection between two vertically oriented pins, preferring a Bezier when
+    /// there is room between stubs and falling back to <see cref="OrthogonalVertical"/> otherwise.
+    /// Perfect X-alignment is not required — a soft curve looks better than a Z-jog when stacked
+    /// boxes (Bottom→Top / Top→Bottom) are only slightly offset.
     /// </summary>
     private static List<Point> RouteVertical(
         double x1, double y1, PinSide sourceSide,
@@ -488,12 +488,10 @@ internal static class ConnectionRenderHelper
         IReadOnlyList<double> reservedVerticalLanes,
         IReadOnlyList<double> reservedHorizontalLanes)
     {
-        var aligned = Math.Abs(x2 - x1) < AlignThreshold;
-        if (aligned
-            && !NeedsOrthogonalVertical(y1, sourceSide, y2, targetSide)
+        if (!NeedsOrthogonalVertical(y1, sourceSide, y2, targetSide)
             && HasBezierRoomVertical(y1, sourceSide, y2, targetSide))
         {
-            return VerticalBezier(x1, y1, sourceSide, x2, y2, targetSide, routeIndex);
+            return VerticalBezier(x1, y1, sourceSide, x2, y2, targetSide);
         }
 
         return OrthogonalVertical(
@@ -1060,63 +1058,64 @@ internal static class ConnectionRenderHelper
     }
 
     /// <summary>
-    /// Builds a sampled cubic Bezier polyline for two horizontally oriented, roughly aligned pins.
+    /// Builds a sampled cubic Bezier polyline for two horizontally oriented pins.
+    /// Control points stay on each pin's Y so a small vertical offset eases smoothly
+    /// without inventing a mid-path S-bow.
     /// </summary>
     private static List<Point> HorizontalBezier(
         double x1, double y1, PinSide sourceSide,
-        double x2, double y2, PinSide targetSide,
-        int routeIndex)
+        double x2, double y2, PinSide targetSide)
     {
         var srcDir = SignOf(sourceSide);
         var tgtDir = SignOf(targetSide);
-        var horizontalOffset = Math.Abs(x2 - x1) * 0.5;
-
-        var alignedY = Math.Abs(y2 - y1) < 0.5;
-        var laneOffset = alignedY ? GetForwardLaneOffset(routeIndex) : 0;
-
-        // For a horizontal route between vertically-offset pins, blend the control
-        // points' Y toward the opposite endpoint so the curve takes a smooth
-        // diagonal path instead of bowing vertically.
-        var blend = alignedY ? 0 : 0.5;
-        var p1y = y1 + (y2 - y1) * blend;
-        var p2y = y2 + (y1 - y2) * blend;
+        var dx = Math.Abs(x2 - x1);
+        var dy = Math.Abs(y2 - y1);
+        var horizontalOffset = SoftStubOffset(dx, dy);
 
         var p0 = new Point(x1, y1);
-        var p1 = new Point(x1 + srcDir * horizontalOffset, p1y + laneOffset);
-        var p2 = new Point(x2 + tgtDir * horizontalOffset, p2y + laneOffset);
+        var p1 = new Point(x1 + srcDir * horizontalOffset, y1);
+        var p2 = new Point(x2 + tgtDir * horizontalOffset, y2);
         var p3 = new Point(x2, y2);
 
         return SampleCubicBezier(p0, p1, p2, p3);
     }
 
     /// <summary>
-    /// Builds a sampled cubic Bezier polyline for two vertically oriented, roughly aligned pins.
+    /// Builds a sampled cubic Bezier polyline for two vertically oriented pins.
+    /// Control points stay on each pin's X so a small horizontal offset eases smoothly
+    /// without inventing a mid-path S-bow (the stacked Bottom→Top case).
     /// </summary>
     private static List<Point> VerticalBezier(
         double x1, double y1, PinSide sourceSide,
-        double x2, double y2, PinSide targetSide,
-        int routeIndex)
+        double x2, double y2, PinSide targetSide)
     {
         var srcDir = SignOf(sourceSide);
         var tgtDir = SignOf(targetSide);
-        var verticalOffset = Math.Abs(y2 - y1) * 0.5;
-
-        var alignedX = Math.Abs(x2 - x1) < 0.5;
-        var laneOffset = alignedX ? GetForwardLaneOffset(routeIndex) : 0;
-
-        // For a vertical route between horizontally-offset pins, blend the control
-        // points' X toward the opposite endpoint so the curve takes a smooth
-        // diagonal path instead of bowing sideways.
-        var blend = alignedX ? 0 : 0.5;
-        var p1x = x1 + (x2 - x1) * blend;
-        var p2x = x2 + (x1 - x2) * blend;
+        var dx = Math.Abs(x2 - x1);
+        var dy = Math.Abs(y2 - y1);
+        var verticalOffset = SoftStubOffset(dy, dx);
 
         var p0 = new Point(x1, y1);
-        var p1 = new Point(p1x + laneOffset, y1 + srcDir * verticalOffset);
-        var p2 = new Point(p2x + laneOffset, y2 + tgtDir * verticalOffset);
+        var p1 = new Point(x1, y1 + srcDir * verticalOffset);
+        var p2 = new Point(x2, y2 + tgtDir * verticalOffset);
         var p3 = new Point(x2, y2);
 
         return SampleCubicBezier(p0, p1, p2, p3);
+    }
+
+    /// <summary>
+    /// Computes a Bezier stub length along the primary axis, reduced when the lateral
+    /// offset is large relative to the primary separation so slight misalignment stays gentle.
+    /// </summary>
+    private static double SoftStubOffset(double primarySpan, double lateralSpan)
+    {
+        var offset = Math.Min(primarySpan * 0.5, Math.Max(StubLength, primarySpan * 0.35));
+        if (lateralSpan <= AlignThreshold || primarySpan <= 0)
+            return offset;
+
+        // Shrink stub as the path becomes more diagonal (lateral dominates).
+        var factor = primarySpan / (primarySpan + lateralSpan);
+        return Math.Max(StubLength * 0.35, offset * factor);
     }
 
     /// <summary>
@@ -1214,17 +1213,5 @@ internal static class ConnectionRenderHelper
         var ox = px - projX;
         var oy = py - projY;
         return Math.Sqrt(ox * ox + oy * oy);
-    }
-
-    /// <summary>
-    /// Returns a small perpendicular offset used to stagger overlapping forward Bezier lanes by <paramref name="routeIndex"/>.
-    /// </summary>
-    private static double GetForwardLaneOffset(int routeIndex)
-    {
-        if (routeIndex == 0)
-            return 0;
-
-        var lane = (routeIndex + 1) / 2;
-        return (routeIndex % 2 == 0 ? lane : -lane) * 12;
     }
 }
