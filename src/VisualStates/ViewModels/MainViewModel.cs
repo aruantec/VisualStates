@@ -4,14 +4,15 @@ using CommunityToolkit.Mvvm.Input;
 using VisualStates.Core.Commands;
 using VisualStates.Core;
 using VisualStates.Core.Models;
+using VisualStates.Runtime;
 using VisualStates.Services;
 
 namespace VisualStates.ViewModels;
 
 /// <summary>
 /// Root editor view-model for the VisualStates canvas. Coordinates project I/O, graph selection,
-/// toolbox actions, the connection drag lifecycle, undo/redo, and C# code generation against the
-/// current <see cref="StateProject"/>.
+/// toolbox actions, the connection drag lifecycle, undo/redo, C# code generation, and stepped
+/// execution preview against the current <see cref="StateProject"/>.
 /// </summary>
 public partial class MainViewModel : ViewModelBase
 {
@@ -19,6 +20,8 @@ public partial class MainViewModel : ViewModelBase
     private readonly IUndoRedoService _undoRedoService;
     private readonly ICodeGenerationService _codeGenerationService;
     private readonly IFileDialogService _fileDialogService;
+    private readonly StateMachineExecutor _executor = new();
+    private CancellationTokenSource? _executionCts;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MainViewModel"/> class and subscribes to
@@ -185,6 +188,30 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     [ObservableProperty]
     private string _generatedCode = string.Empty;
+
+    /// <summary>
+    /// Backing field for <see cref="IsExecuting"/>, whether a stepped execution preview is running.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isExecuting;
+
+    /// <summary>
+    /// Backing field for <see cref="ExecutingBox"/>, the box currently highlighted during execution preview.
+    /// </summary>
+    [ObservableProperty]
+    private StateBoxViewModel? _executingBox;
+
+    /// <summary>
+    /// Backing field for <see cref="ExecutingStep"/>, the step currently highlighted during execution preview.
+    /// </summary>
+    [ObservableProperty]
+    private StateStepViewModel? _executingStep;
+
+    /// <summary>
+    /// Backing field for <see cref="ExecutingConnection"/>, the connection currently highlighted during execution preview.
+    /// </summary>
+    [ObservableProperty]
+    private ConnectionViewModel? _executingConnection;
 
     /// <summary>
     /// Backing field for <see cref="IsConnecting"/>, whether a connection drag is in progress.
@@ -385,6 +412,55 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanRedo))]
     private void Redo() => _undoRedoService.Redo();
+
+    /// <summary>
+    /// Makes <paramref name="box"/> the sole main entry point, clearing the flag on every other box.
+    /// </summary>
+    /// <param name="box">The state box to promote as entry.</param>
+    public void SetAsEntryPoint(StateBoxViewModel box)
+    {
+        if (box.IsEntry && Boxes.Count(b => b.IsEntry) == 1)
+            return;
+
+        var previous = Boxes.Where(b => b.IsEntry).Select(b => b.Id).ToList();
+        ExecuteTracked("Set Main Entry Point", () =>
+        {
+            ApplyEntryPoint(box);
+            StatusText = $"{box.Name} set as main entry point";
+            _projectService.MarkDirty();
+            UpdateTitle();
+            NotifyGraphChanged();
+        }, () =>
+        {
+            foreach (var candidate in Boxes)
+                candidate.SetIsEntryCore(previous.Contains(candidate.Id));
+            _projectService.MarkDirty();
+            UpdateTitle();
+            NotifyGraphChanged();
+        });
+    }
+
+    /// <summary>
+    /// Command wrapper for <see cref="SetAsEntryPoint"/> used by context menus and bindings.
+    /// </summary>
+    /// <param name="box">The state box to promote, or <see langword="null"/> to no-op.</param>
+    [RelayCommand]
+    private void SetAsMainEntryPoint(StateBoxViewModel? box)
+    {
+        if (box is null)
+            return;
+
+        SetAsEntryPoint(box);
+    }
+
+    /// <summary>
+    /// Clears entry flags on all boxes, then marks <paramref name="box"/> as the entry point.
+    /// </summary>
+    private void ApplyEntryPoint(StateBoxViewModel box)
+    {
+        foreach (var candidate in Boxes)
+            candidate.SetIsEntryCore(candidate == box);
+    }
 
     /// <summary>
     /// Command that adds a new state box, optionally inside <see cref="SelectedZone"/>.
@@ -662,13 +738,147 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Whether <see cref="ExecuteGraphCommand"/> can start a new stepped execution preview.
+    /// </summary>
+    private bool CanExecuteGraph() => !IsExecuting;
+
+    /// <summary>
+    /// Whether <see cref="StopExecutionCommand"/> can cancel the current execution preview.
+    /// </summary>
+    private bool CanStopExecution() => IsExecuting;
+
+    /// <summary>
+    /// Notifies execute/stop command availability when <see cref="IsExecuting"/> changes.
+    /// </summary>
+    /// <param name="value">New executing flag.</param>
+    partial void OnIsExecutingChanged(bool value)
+    {
+        ExecuteGraphCommand.NotifyCanExecuteChanged();
+        StopExecutionCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Command that walks the planned happy-path order one step at a time with a one-second delay,
+    /// highlighting the active box, step, and connecting wire.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanExecuteGraph))]
+    private async Task ExecuteGraphAsync()
+    {
+        var plan = _executor.GetExecutionPlan(_projectService.Current);
+        if (plan.Count == 0)
+        {
+            StatusText = "Nothing to execute";
+            return;
+        }
+
+        _executionCts?.Cancel();
+        _executionCts?.Dispose();
+        _executionCts = new CancellationTokenSource();
+        var token = _executionCts.Token;
+
+        IsExecuting = true;
+        StatusText = $"Executing 0/{plan.Count}…";
+
+        try
+        {
+            ExecutionPlanItem? previous = null;
+            for (var i = 0; i < plan.Count; i++)
+            {
+                token.ThrowIfCancellationRequested();
+
+                var item = plan[i];
+                ExecutingBox = FindBox(item.BoxId);
+                ExecutingStep = item.StepId is null ? null : FindStep(item.BoxId, item.StepId);
+                ExecutingConnection = previous is { } prev
+                    ? FindConnectionAlongPath(prev, item)
+                    : null;
+
+                var label = ExecutingStep?.KindLabel ?? ExecutingBox?.Name ?? item.BoxId;
+                StatusText = $"Executing {i + 1}/{plan.Count}: {label}";
+
+                await Task.Delay(TimeSpan.FromSeconds(1), token);
+                previous = item;
+            }
+
+            StatusText = "Execution complete";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Execution stopped";
+        }
+        finally
+        {
+            ClearExecutionHighlight();
+            IsExecuting = false;
+            _executionCts?.Dispose();
+            _executionCts = null;
+        }
+    }
+
+    /// <summary>
+    /// Command that cancels an in-progress stepped execution preview.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanStopExecution))]
+    private void StopExecution()
+    {
+        _executionCts?.Cancel();
+    }
+
+    /// <summary>
+    /// Clears execution-preview highlight references.
+    /// </summary>
+    private void ClearExecutionHighlight()
+    {
+        ExecutingBox = null;
+        ExecutingStep = null;
+        ExecutingConnection = null;
+    }
+
+    /// <summary>
+    /// Finds a non-error connection that links <paramref name="from"/> to <paramref name="to"/>
+    /// by box and optional step ids.
+    /// </summary>
+    private ConnectionViewModel? FindConnectionAlongPath(ExecutionPlanItem from, ExecutionPlanItem to)
+    {
+        foreach (var connection in Connections)
+        {
+            if (connection.IsError)
+                continue;
+
+            if (!EndpointMatches(connection.Model.SourceBoxId, connection.Model.SourceStepId, from))
+                continue;
+            if (!EndpointMatches(connection.Model.TargetBoxId, connection.Model.TargetStepId, to))
+                continue;
+
+            return connection;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns whether a connection endpoint matches a plan item, allowing blank step ids
+    /// to match any step on that box (box-level pins).
+    /// </summary>
+    private static bool EndpointMatches(string boxId, string? stepId, ExecutionPlanItem item)
+    {
+        if (boxId != item.BoxId)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(stepId))
+            return true;
+
+        return stepId == item.StepId;
+    }
+
+    /// <summary>
     /// Command that selects a connection and clears competing box, step, and zone selection.
     /// </summary>
     /// <param name="connection">The connection to select, or <see langword="null"/> to clear connection selection.</param>
     [RelayCommand]
     private void SelectConnection(ConnectionViewModel? connection)
     {
-        foreach (var item in Connections)
+        foreach (var item in Connections.ToList())
             item.IsSelected = item == connection;
 
         SelectedConnection = connection;
@@ -676,12 +886,12 @@ public partial class MainViewModel : ViewModelBase
 
         if (connection?.SourceBox is not null)
         {
-            foreach (var box in Boxes)
+            foreach (var box in Boxes.ToList())
                 box.IsSelected = false;
             SelectedBox = null;
         }
 
-        foreach (var zone in Zones)
+        foreach (var zone in Zones.ToList())
             zone.IsSelected = false;
         SelectedZone = null;
 
@@ -706,16 +916,16 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void SelectZone(ZoneViewModel? zone)
     {
-        foreach (var item in Zones)
+        foreach (var item in Zones.ToList())
             item.IsSelected = item == zone;
 
         SelectedZone = zone;
         SelectedBox = null;
         SelectedStep = null;
         SelectedConnection = null;
-        foreach (var box in Boxes)
+        foreach (var box in Boxes.ToList())
             box.IsSelected = false;
-        foreach (var connection in Connections)
+        foreach (var connection in Connections.ToList())
             connection.IsSelected = false;
 
         RefreshSelectedZoneChildren();
@@ -729,16 +939,16 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void SelectBox(StateBoxViewModel? box)
     {
-        foreach (var item in Boxes)
+        foreach (var item in Boxes.ToList())
             item.IsSelected = item == box;
 
         SelectedBox = box;
         SelectedStep = null;
         SelectedConnection = null;
-        foreach (var connection in Connections)
+        foreach (var connection in Connections.ToList())
             connection.IsSelected = false;
 
-        foreach (var zone in Zones)
+        foreach (var zone in Zones.ToList())
             zone.IsSelected = false;
         SelectedZone = null;
 
@@ -755,17 +965,17 @@ public partial class MainViewModel : ViewModelBase
     {
         SelectedStep = step;
         SelectedConnection = null;
-        foreach (var connection in Connections)
+        foreach (var connection in Connections.ToList())
             connection.IsSelected = false;
         if (step is not null)
         {
-            foreach (var box in Boxes)
+            foreach (var box in Boxes.ToList())
                 box.IsSelected = box == step.Parent;
 
             SelectedBox = step.Parent;
         }
 
-        foreach (var zone in Zones)
+        foreach (var zone in Zones.ToList())
             zone.IsSelected = false;
         SelectedZone = null;
 
@@ -1183,6 +1393,7 @@ public partial class MainViewModel : ViewModelBase
     /// <param name="box">The box to delete.</param>
     private void DeleteBox(StateBoxViewModel box)
     {
+        var wasEntry = box.IsEntry;
         var removedConnections = Connections
             .Where(c => c.SourceBox == box || c.TargetBox == box)
             .ToList();
@@ -1198,12 +1409,26 @@ public partial class MainViewModel : ViewModelBase
             _projectService.Current.Boxes.Remove(box.Model);
             Boxes.Remove(box);
             SelectedBox = null;
+            if (wasEntry)
+            {
+                var next = Boxes.FirstOrDefault();
+                next?.SetIsEntryCore(true);
+            }
             _projectService.MarkDirty();
             UpdateTitle();
+            NotifyGraphChanged();
         }, () =>
         {
+            if (wasEntry)
+            {
+                foreach (var candidate in Boxes)
+                    candidate.SetIsEntryCore(false);
+            }
+
             _projectService.Current.Boxes.Add(box.Model);
             Boxes.Add(box);
+            if (wasEntry)
+                box.SetIsEntryCore(true);
             foreach (var connection in removedConnections)
             {
                 _projectService.Current.Connections.Add(connection.Model);
@@ -1211,6 +1436,7 @@ public partial class MainViewModel : ViewModelBase
             }
             _projectService.MarkDirty();
             UpdateTitle();
+            NotifyGraphChanged();
         });
     }
 
@@ -1278,6 +1504,11 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void RefreshFromProject()
     {
+        if (IsExecuting)
+            _executionCts?.Cancel();
+
+        ClearExecutionHighlight();
+
         Boxes.Clear();
         Zones.Clear();
         Connections.Clear();

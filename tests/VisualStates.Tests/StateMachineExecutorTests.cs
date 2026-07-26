@@ -49,6 +49,67 @@ public sealed class StateMachineExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_DoesNotRunErrorHandler_WhenNoException()
+    {
+        var context = new RecordingContext();
+        var project = new StateProject
+        {
+            Boxes =
+            [
+                new StateBox
+                {
+                    Id = "main",
+                    IsEntry = true,
+                    Steps =
+                    [
+                        new StateStep { Id = "work", Kind = StepKind.CallMethod, MethodName = "Work" }
+                    ]
+                },
+                new StateBox
+                {
+                    Id = "next",
+                    Steps =
+                    [
+                        new StateStep { Id = "nextStep", Kind = StepKind.CallEvent, EventName = "Next" }
+                    ]
+                },
+                new StateBox
+                {
+                    Id = "handler",
+                    Steps =
+                    [
+                        new StateStep { Id = "recover", Kind = StepKind.CallEvent, EventName = "Recovered" }
+                    ]
+                }
+            ],
+            Connections =
+            [
+                new StateConnection
+                {
+                    SourceBoxId = "main",
+                    SourceStepId = "work",
+                    TargetBoxId = "next",
+                    TargetStepId = "nextStep"
+                },
+                new StateConnection
+                {
+                    SourceBoxId = "main",
+                    SourceStepId = "work",
+                    SourceSide = PinSide.Error,
+                    TargetBoxId = "handler",
+                    TargetStepId = "recover",
+                    IsError = true
+                }
+            ]
+        };
+
+        await new StateMachineExecutor().ExecuteAsync(project, context, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["method:Work", "event:Next"], context.Calls);
+        Assert.DoesNotContain("event:Recovered", context.Calls);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_DivertsToErrorHandler_WhenStepThrows()
     {
         var context = new RecordingContext { ThrowOnMethod = "Boom" };
@@ -187,6 +248,59 @@ public sealed class ExecutionPlannerTests
         Assert.Equal(2, plan.Count);
         Assert.Equal("a", plan[0].Box.Id);
         Assert.Equal("b", plan[1].Box.Id);
+    }
+
+    [Fact]
+    public void Plan_ExcludesErrorOnlyTargets_FromHappyPath()
+    {
+        var project = new StateProject
+        {
+            Boxes =
+            [
+                new StateBox
+                {
+                    Id = "main",
+                    IsEntry = true,
+                    Steps = [new StateStep { Id = "work", Kind = StepKind.CallEvent, EventName = "Work" }]
+                },
+                new StateBox
+                {
+                    Id = "next",
+                    Steps = [new StateStep { Id = "nextStep", Kind = StepKind.CallEvent, EventName = "Next" }]
+                },
+                new StateBox
+                {
+                    Id = "handler",
+                    Steps = [new StateStep { Id = "recover", Kind = StepKind.CallEvent, EventName = "Recovered" }]
+                }
+            ],
+            Connections =
+            [
+                new StateConnection
+                {
+                    SourceBoxId = "main",
+                    SourceStepId = "work",
+                    TargetBoxId = "next",
+                    TargetStepId = "nextStep"
+                },
+                new StateConnection
+                {
+                    SourceBoxId = "main",
+                    SourceStepId = "work",
+                    SourceSide = PinSide.Error,
+                    TargetBoxId = "handler",
+                    TargetStepId = "recover",
+                    IsError = true
+                }
+            ]
+        };
+
+        var plan = ExecutionPlanner.Plan(project);
+
+        Assert.Equal(2, plan.Count);
+        Assert.Equal("main", plan[0].Box.Id);
+        Assert.Equal("next", plan[1].Box.Id);
+        Assert.DoesNotContain(plan, step => step.Box.Id == "handler");
     }
 
     [Fact]

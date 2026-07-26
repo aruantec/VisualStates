@@ -100,7 +100,8 @@ public partial class StateBoxViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Whether this box is marked as an entry point in the state graph.
+    /// Whether this box is the main entry point of the state graph.
+    /// Setting <see langword="true"/> clears the flag on every other box.
     /// </summary>
     public bool IsEntry
     {
@@ -110,9 +111,32 @@ public partial class StateBoxViewModel : ViewModelBase
             if (Model.IsEntry == value)
                 return;
 
-            Model.IsEntry = value;
+            if (value)
+            {
+                Main.SetAsEntryPoint(this);
+                return;
+            }
+
+            // Keep at least one entry when possible — ignore uncheck on the current main.
+            if (Main.Boxes.Count(b => b.IsEntry) <= 1)
+                return;
+
+            Model.IsEntry = false;
             OnPropertyChanged();
         }
+    }
+
+    /// <summary>
+    /// Updates <see cref="IsEntry"/> without re-entering <see cref="MainViewModel.SetAsEntryPoint"/>.
+    /// </summary>
+    /// <param name="value">New entry-point flag.</param>
+    internal void SetIsEntryCore(bool value)
+    {
+        if (Model.IsEntry == value)
+            return;
+
+        Model.IsEntry = value;
+        OnPropertyChanged(nameof(IsEntry));
     }
 
     /// <summary>

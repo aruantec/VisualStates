@@ -224,7 +224,10 @@ public class GraphCanvas : Control
             or nameof(MainViewModel.SelectedStep)
             or nameof(MainViewModel.SelectedZone)
             or nameof(MainViewModel.ZoneDropTarget)
-            or nameof(MainViewModel.SelectedConnection))
+            or nameof(MainViewModel.SelectedConnection)
+            or nameof(MainViewModel.ExecutingBox)
+            or nameof(MainViewModel.ExecutingStep)
+            or nameof(MainViewModel.ExecutingConnection))
         {
             InvalidateVisual();
         }
@@ -433,7 +436,29 @@ public class GraphCanvas : Control
     internal void HandlePointerReleased(PointerReleasedEventArgs e) => OnPointerReleased(e);
 
     /// <summary>
+    /// Opens a context menu for a state box with the "Set as Main Entry Point" action.
+    /// </summary>
+    /// <param name="box">The box under the pointer.</param>
+    /// <param name="screenPoint">Pointer position in canvas coordinates (unused; menu opens at the control).</param>
+    private void OpenStateBoxContextMenu(StateBoxViewModel box, Point screenPoint)
+    {
+        _ = screenPoint;
+        var setEntry = new MenuItem
+        {
+            Header = box.IsEntry ? "Main Entry Point" : "Set as Main Entry Point",
+            Command = ViewModel!.SetAsMainEntryPointCommand,
+            CommandParameter = box,
+            IsEnabled = !box.IsEntry
+        };
+
+        var menu = new ContextMenu();
+        menu.Items.Add(setEntry);
+        menu.Open(this);
+    }
+
+    /// <summary>
     /// Handles middle-button or Shift+left-button pan, pin hits, box/zone selection and drag,
+    /// right-click state-box context menu, and background pan start.
     /// and background pan with click-to-select.
     /// Pins are direction-agnostic: any pin can start or complete a connection drag.
     /// The pin where the drag starts is the source; the pin where the user drops is the target.
@@ -451,6 +476,20 @@ public class GraphCanvas : Control
             _backgroundViewPan = false;
             StartViewPan(e.Pointer, point.Position);
             e.Handled = true;
+            return;
+        }
+
+        if (point.Properties.IsRightButtonPressed && ViewModel is not null)
+        {
+            var rightGraphPoint = ScreenToGraph(point.Position);
+            var (contextBox, _) = HitTest(rightGraphPoint);
+            if (contextBox is not null)
+            {
+                ViewModel.SelectBoxCommand.Execute(contextBox);
+                OpenStateBoxContextMenu(contextBox, point.Position);
+                e.Handled = true;
+            }
+
             return;
         }
 
@@ -1027,8 +1066,19 @@ public class GraphCanvas : Control
         var rect = new Rect(box.X, box.Y, box.Width, totalHeight);
         var isDragging = _dragBox == box;
         var dropTarget = ViewModel!.ZoneDropTarget;
+        var isExecuting = ViewModel.ExecutingBox == box;
 
-        if (isDragging && dropTarget is not null)
+        if (isExecuting)
+        {
+            var glowRect = rect.Inflate(5);
+            context.DrawRectangle(
+                null,
+                new Pen(new SolidColorBrush(Color.FromArgb(160, 0, 200, 120)), 3.5),
+                glowRect,
+                8,
+                8);
+        }
+        else if (isDragging && dropTarget is not null)
         {
             var accent = dropTarget.AccentColor;
             var glowRect = rect.Inflate(4);
@@ -1052,11 +1102,25 @@ public class GraphCanvas : Control
 
         var headerBrush = box.HeaderBrush;
         var bodyBrush = new SolidColorBrush(Color.FromRgb(35, 35, 38));
-        var borderBrush = box.IsSelected && ViewModel!.SelectedStep is null
-            ? new SolidColorBrush(Color.FromRgb(255, 140, 0))
-            : new SolidColorBrush(Color.FromRgb(70, 70, 75));
+        IBrush borderBrush;
+        double borderWidth;
+        if (isExecuting)
+        {
+            borderBrush = new SolidColorBrush(Color.FromRgb(0, 200, 120));
+            borderWidth = 2.5;
+        }
+        else if (box.IsSelected && ViewModel!.SelectedStep is null)
+        {
+            borderBrush = new SolidColorBrush(Color.FromRgb(255, 140, 0));
+            borderWidth = 2.5;
+        }
+        else
+        {
+            borderBrush = new SolidColorBrush(Color.FromRgb(70, 70, 75));
+            borderWidth = box.IsSelected ? 2.5 : 1.5;
+        }
 
-        context.DrawRectangle(bodyBrush, new Pen(borderBrush, box.IsSelected ? 2.5 : 1.5), rect, 6, 6);
+        context.DrawRectangle(bodyBrush, new Pen(borderBrush, borderWidth), rect, 6, 6);
         context.DrawRectangle(headerBrush, null, new Rect(box.X, box.Y, box.Width, HeaderHeight), 6, 6);
 
         var typeface = new Typeface(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold);
@@ -1069,6 +1133,18 @@ public class GraphCanvas : Control
             Brushes.White);
 
         context.DrawText(text, new Point(box.X + 12, box.Y + 8));
+
+        if (box.IsEntry)
+        {
+            var badge = new FormattedText(
+                "MAIN",
+                CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight,
+                new Typeface(FontFamily.Default, FontStyle.Normal, FontWeight.Bold),
+                9,
+                new SolidColorBrush(Color.FromRgb(255, 220, 160)));
+            context.DrawText(badge, new Point(box.X + 12 + text.Width + 8, box.Y + 11));
+        }
 
         var y = box.Y + HeaderHeight + StepPadding;
         foreach (var step in box.Steps)
@@ -1089,6 +1165,7 @@ public class GraphCanvas : Control
     {
         var rect = GetStepRect(box, y);
         var isSelected = ViewModel?.SelectedStep == step;
+        var isExecuting = ViewModel?.ExecutingStep == step;
         var accent = step.Kind switch
         {
             StepKind.SetVariable => Color.FromRgb(70, 150, 90),
@@ -1097,13 +1174,22 @@ public class GraphCanvas : Control
             _ => Color.FromRgb(90, 90, 95)
         };
 
-        var fill = isSelected
-            ? Color.FromRgb(62, 62, 70)
-            : Color.FromRgb(48, 48, 52);
+        var fill = isExecuting
+            ? Color.FromRgb(28, 72, 52)
+            : isSelected
+                ? Color.FromRgb(62, 62, 70)
+                : Color.FromRgb(48, 48, 52);
+
+        var borderColor = isExecuting
+            ? Color.FromRgb(0, 200, 120)
+            : isSelected
+                ? Color.FromRgb(255, 140, 0)
+                : accent;
+        var borderWidth = isExecuting || isSelected ? 2.0 : 1.5;
 
         context.DrawRectangle(
             new SolidColorBrush(fill),
-            new Pen(new SolidColorBrush(isSelected ? Color.FromRgb(255, 140, 0) : accent), isSelected ? 2 : 1.5),
+            new Pen(new SolidColorBrush(borderColor), borderWidth),
             rect,
             4,
             4);

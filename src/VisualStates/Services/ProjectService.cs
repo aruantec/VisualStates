@@ -78,13 +78,17 @@ public sealed class ProjectService : IProjectService
     }
 
     /// <summary>Marks the project dirty if it is not already.</summary>
+    /// <remarks>
+    /// Does not raise <see cref="ProjectChanged"/> — that event reloads the full project
+    /// document (New/Open/Save/Replace). Dirty-only updates are handled by callers via
+    /// title refresh so the graph view-models are not torn down mid-edit.
+    /// </remarks>
     public void MarkDirty()
     {
         if (IsDirty)
             return;
 
         IsDirty = true;
-        ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -108,7 +112,7 @@ public sealed class ProjectService : IProjectService
         [
             new StateBox
             {
-                Name = "Entry",
+                Name = "Main",
                 IsEntry = true,
                 HeaderColor = "#E74C3C",
                 X = 80,

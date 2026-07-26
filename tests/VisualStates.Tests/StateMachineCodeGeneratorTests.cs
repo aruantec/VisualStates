@@ -228,9 +228,8 @@ public sealed class ExecutionOrderBuilderTests
 
         var order = ExecutionOrderBuilder.Build(project);
 
-        // Both nodes appear, but error edge does not force err after a.
         Assert.Contains(new ExecutionNode("a", "a1"), order);
-        Assert.Contains(new ExecutionNode("err", "e1"), order);
+        Assert.DoesNotContain(new ExecutionNode("err", "e1"), order);
     }
 
     [Fact]

@@ -435,24 +435,25 @@ internal static class ExecutionOrderBuilder
             }
         }
 
-        var queue = new Queue<ExecutionNode>(
-            incoming.Where(kv => kv.Value == 0).Select(kv => kv.Key));
-
-        if (queue.Count == 0)
+        // Error-pin targets are catch destinations only. Ignoring error edges leaves them
+        // at indegree 0, which previously seeded them into the happy-path RunAsync order.
+        var errorTargets = new HashSet<ExecutionNode>();
+        foreach (var connection in project.Connections)
         {
-            var entryBox = project.Boxes.FirstOrDefault(b => b.IsEntry) ?? project.Boxes.FirstOrDefault();
-            if (entryBox is not null)
+            if (connection.IsError || connection.SourceSide == PinSide.Error)
             {
-                var entryNode = entryBox.Steps.Count > 0
-                    ? new ExecutionNode(entryBox.Id, entryBox.Steps[0].Id)
-                    : new ExecutionNode(entryBox.Id, null);
-                queue.Enqueue(entryNode);
-            }
-            else
-            {
-                queue.Enqueue(nodes[0]);
+                var errorTarget = ResolveConnectionTarget(project, connection);
+                if (errorTarget is not null && nodeSet.Contains(errorTarget.Value))
+                    errorTargets.Add(errorTarget.Value);
             }
         }
+
+        var queue = new Queue<ExecutionNode>();
+        var entryBox = project.Boxes.FirstOrDefault(b => b.IsEntry) ?? project.Boxes.FirstOrDefault();
+        if (entryBox is not null)
+            queue.Enqueue(BoxEnterNode(entryBox));
+        else
+            queue.Enqueue(nodes[0]);
 
         var ordered = new List<ExecutionNode>();
         var visited = new HashSet<ExecutionNode>();
@@ -473,8 +474,10 @@ internal static class ExecutionOrderBuilder
 
         foreach (var node in nodes)
         {
-            if (!visited.Contains(node))
-                ordered.Add(node);
+            if (visited.Contains(node) || errorTargets.Contains(node))
+                continue;
+
+            ordered.Add(node);
         }
 
         return ordered;

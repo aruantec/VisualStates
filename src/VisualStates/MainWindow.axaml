@@ -17,25 +17,75 @@
         Background="#FF1E1E1E">
 
   <DockPanel>
-    <Menu DockPanel.Dock="Top">
-      <MenuItem Header="_File">
-        <MenuItem Header="_New" Command="{Binding NewProjectCommand}" />
-        <MenuItem Header="_Open..." Command="{Binding OpenProjectCommand}" />
-        <MenuItem Header="_Save" Command="{Binding SaveProjectCommand}" />
-        <MenuItem Header="Save _As..." Command="{Binding SaveProjectAsCommand}" />
-        <Separator />
-        <MenuItem Header="E_xit" Click="OnExitClick" />
-      </MenuItem>
-      <MenuItem Header="_Edit">
-        <MenuItem Header="_Undo" Command="{Binding UndoCommand}" />
-        <MenuItem Header="_Redo" Command="{Binding RedoCommand}" />
-        <Separator />
-        <MenuItem Header="_Delete" Command="{Binding DeleteSelectionCommand}" />
-      </MenuItem>
-      <MenuItem Header="_Generate">
-        <MenuItem Header="Generate C#" Command="{Binding GenerateCodeCommand}" />
-      </MenuItem>
-    </Menu>
+    <Border DockPanel.Dock="Top"
+            Background="#FF2A2A2A"
+            BorderBrush="#FF3A3A3A"
+            BorderThickness="0,0,0,1">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right"
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    Margin="8,4,10,4"
+                    VerticalAlignment="Center">
+          <Button Command="{Binding ExecuteGraphCommand}"
+                  ToolTip.Tip="Execute"
+                  Width="32"
+                  Height="28"
+                  Padding="0"
+                  Background="#FF2D2D30"
+                  BorderBrush="#FF3F3F46"
+                  HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center">
+            <Path Data="M 4,2 L 14,8 L 4,14 Z"
+                  Fill="#FF4CAF50"
+                  Width="12"
+                  Height="12"
+                  Stretch="Uniform"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center" />
+          </Button>
+          <Button Command="{Binding StopExecutionCommand}"
+                  ToolTip.Tip="Stop"
+                  Width="32"
+                  Height="28"
+                  Padding="0"
+                  Background="#FF2D2D30"
+                  BorderBrush="#FF3F3F46"
+                  HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center">
+            <Rectangle Width="10"
+                       Height="10"
+                       Fill="#FFE57373"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+          </Button>
+        </StackPanel>
+
+        <Menu Background="Transparent">
+          <MenuItem Header="_File">
+            <MenuItem Header="_New" Command="{Binding NewProjectCommand}" />
+            <MenuItem Header="_Open..." Command="{Binding OpenProjectCommand}" />
+            <MenuItem Header="_Save" Command="{Binding SaveProjectCommand}" />
+            <MenuItem Header="Save _As..." Command="{Binding SaveProjectAsCommand}" />
+            <Separator />
+            <MenuItem Header="E_xit" Click="OnExitClick" />
+          </MenuItem>
+          <MenuItem Header="_Edit">
+            <MenuItem Header="_Undo" Command="{Binding UndoCommand}" />
+            <MenuItem Header="_Redo" Command="{Binding RedoCommand}" />
+            <Separator />
+            <MenuItem Header="_Delete" Command="{Binding DeleteSelectionCommand}" />
+          </MenuItem>
+          <MenuItem Header="_Generate">
+            <MenuItem Header="Generate C#" Command="{Binding GenerateCodeCommand}" />
+          </MenuItem>
+          <MenuItem Header="_Debug">
+            <MenuItem Header="_Execute" Command="{Binding ExecuteGraphCommand}" />
+            <MenuItem Header="_Stop" Command="{Binding StopExecutionCommand}" />
+          </MenuItem>
+        </Menu>
+      </DockPanel>
+    </Border>
 
     <Border DockPanel.Dock="Bottom"
             Background="#FF2A2A2A"
@@ -114,7 +164,9 @@
                 <StackPanel Spacing="8">
                   <TextBlock Text="Selected Box" FontWeight="SemiBold" Foreground="White" />
                   <TextBox Text="{Binding SelectedBox.Name}" PlaceholderText="Box name" />
-                  <CheckBox Content="Entry state" IsChecked="{Binding SelectedBox.IsEntry}" />
+                  <CheckBox Content="Main entry point"
+                            IsChecked="{Binding SelectedBox.IsEntry}"
+                            IsEnabled="{Binding SelectedBox.IsEntry, Converter={x:Static BoolConverters.Not}}" />
                   <TextBlock Text="Zone" FontWeight="SemiBold" Foreground="White" Margin="0,4,0,0" />
                   <ComboBox ItemsSource="{Binding Zones}"
                             SelectedItem="{Binding SelectedBoxParentZone}"

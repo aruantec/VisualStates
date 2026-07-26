@@ -44,7 +44,10 @@ public interface IProjectService
     /// <param name="cancellationToken">Cancellation token.</param>
     Task SaveAsAsync(string path, CancellationToken cancellationToken = default);
 
-    /// <summary>Marks the project dirty if it is not already.</summary>
+    /// <summary>
+    /// Marks the project dirty if it is not already. Does not raise
+    /// <see cref="ProjectChanged"/> (that event is reserved for document load/replace).
+    /// </summary>
     void MarkDirty();
 
     /// <summary>

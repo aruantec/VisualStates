@@ -41,12 +41,33 @@ public interface IGeneratedStateMachine
 }
 
 /// <summary>
+/// A planned execution position: a box id and optional step id.
+/// </summary>
+/// <param name="BoxId">Owning state box id.</param>
+/// <param name="StepId">Step id within the box, or null for an empty box.</param>
+public readonly record struct ExecutionPlanItem(string BoxId, string? StepId);
+
+/// <summary>
 /// Interprets a <see cref="StateProject"/> at runtime without emitting C# source:
 /// plans a topological execution order, runs each step, and diverts to error
 /// handlers when a step throws.
 /// </summary>
 public sealed class StateMachineExecutor
 {
+    /// <summary>
+    /// Returns the topological happy-path execution order for <paramref name="project"/>
+    /// as box/step id pairs suitable for UI preview and stepping.
+    /// </summary>
+    /// <param name="project">Project graph to plan.</param>
+    public IReadOnlyList<ExecutionPlanItem> GetExecutionPlan(StateProject project)
+    {
+        var order = ExecutionPlanner.Plan(project);
+        var items = new List<ExecutionPlanItem>(order.Count);
+        foreach (var step in order)
+            items.Add(new ExecutionPlanItem(step.Box.Id, step.Step?.Id));
+        return items;
+    }
+
     /// <summary>
     /// Executes <paramref name="project"/> against <paramref name="context"/>,
     /// stopping after the first handled error branch.
@@ -154,17 +175,18 @@ internal static class ExecutionPlanner
             }
         }
 
-        var queue = new Queue<RuntimeStepKey>(
-            incoming.Where(kv => kv.Value == 0).Select(kv => kv.Key));
+        // Error-pin targets are not part of the happy path. They used to appear as
+        // zero-indegree seeds (error edges are ignored when building adjacency) and
+        // ran before/alongside the real entry. Start from the entry only, and never
+        // append unvisited error-only targets onto the main plan.
+        var errorTargets = CollectErrorTargets(project, stepMap);
 
-        if (queue.Count == 0)
-        {
-            var entry = project.Boxes.FirstOrDefault(b => b.IsEntry) ?? project.Boxes.FirstOrDefault();
-            if (entry is not null)
-                queue.Enqueue(RuntimeStepKey.From(project, entry.Id, entry.Steps.FirstOrDefault()?.Id));
-            else
-                queue.Enqueue(steps[0].Key);
-        }
+        var queue = new Queue<RuntimeStepKey>();
+        var entry = project.Boxes.FirstOrDefault(b => b.IsEntry) ?? project.Boxes.FirstOrDefault();
+        if (entry is not null)
+            queue.Enqueue(BoxEnterKey(entry));
+        else
+            queue.Enqueue(steps[0].Key);
 
         var ordered = new List<RuntimeStep>();
         var visited = new HashSet<RuntimeStepKey>();
@@ -185,11 +207,34 @@ internal static class ExecutionPlanner
 
         foreach (var step in steps)
         {
-            if (!visited.Contains(step.Key))
-                ordered.Add(step);
+            if (visited.Contains(step.Key) || errorTargets.Contains(step.Key))
+                continue;
+
+            ordered.Add(step);
         }
 
         return ordered;
+    }
+
+    /// <summary>
+    /// Collects step keys that are targets of error-pin connections.
+    /// </summary>
+    private static HashSet<RuntimeStepKey> CollectErrorTargets(
+        StateProject project,
+        IReadOnlyDictionary<RuntimeStepKey, RuntimeStep> stepMap)
+    {
+        var targets = new HashSet<RuntimeStepKey>();
+        foreach (var connection in project.Connections)
+        {
+            if (!IsErrorConnection(connection))
+                continue;
+
+            var target = ResolveConnectionTarget(project, connection);
+            if (target is not null && stepMap.ContainsKey(target.Value))
+                targets.Add(target.Value);
+        }
+
+        return targets;
     }
 
     /// <summary>

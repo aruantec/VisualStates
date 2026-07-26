@@ -205,7 +205,8 @@ public class CompositionConnectionLayer : Control
             or nameof(MainViewModel.ConnectionSourceZone)
             or nameof(MainViewModel.ConnectionHoverZone)
             or nameof(MainViewModel.ConnectionHoverSide)
-            or nameof(MainViewModel.SelectedConnection))
+            or nameof(MainViewModel.SelectedConnection)
+            or nameof(MainViewModel.ExecutingConnection))
         {
             InvalidateVisual();
         }
@@ -308,25 +309,30 @@ public class CompositionConnectionLayer : Control
         DrawingContext context, ConnectionViewModel connection, IReadOnlyList<Point> points)
     {
         var geometry = ConnectionRenderHelper.CreateRoutedGeometry(points);
+        var isExecuting = ViewModel?.ExecutingConnection == connection;
 
-        var wireColor = connection.IsSelected
-            ? Color.FromRgb(255, 140, 0)
-            : connection.IsError
-                ? Color.FromRgb(220, 70, 70)
-                : Color.FromRgb(220, 220, 220);
-        var wireWidth = connection.IsSelected ? 3.0 : 2.5;
+        var wireColor = isExecuting
+            ? Color.FromRgb(0, 200, 120)
+            : connection.IsSelected
+                ? Color.FromRgb(255, 140, 0)
+                : connection.IsError
+                    ? Color.FromRgb(220, 70, 70)
+                    : Color.FromRgb(220, 220, 220);
+        var wireWidth = isExecuting || connection.IsSelected ? 3.0 : 2.5;
 
         context.DrawGeometry(null, CreateRoundPen(wireColor, wireWidth), geometry);
 
-        if (connection.IsSelected)
+        if (isExecuting || connection.IsSelected)
             DrawInnerGlowFlow(context, geometry, wireWidth, selected: true);
         else
             DrawInnerGlowFlow(context, geometry, wireWidth, selected: false);
 
         var routePoint = ConnectionRenderHelper.GetRoutePoint(points);
-        var markerColor = connection.IsSelected
-            ? Color.FromRgb(255, 140, 0)
-            : Color.FromRgb(220, 220, 220);
+        var markerColor = isExecuting
+            ? Color.FromRgb(0, 200, 120)
+            : connection.IsSelected
+                ? Color.FromRgb(255, 140, 0)
+                : Color.FromRgb(220, 220, 220);
         DrawDirectionMarker(context, routePoint, markerColor);
     }
 
