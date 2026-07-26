@@ -571,9 +571,6 @@ public partial class MainViewModel : ViewModelBase
 
     public void StartConnectionDragFromZone(ZoneViewModel zone, PinSide side, double endX, double endY)
     {
-        if (!ZoneFlow.IsOutputSide(side))
-            return;
-
         var exitBox = zone.GetExitBox();
         StartConnectionDragCore(exitBox, step: null, zone, side, endX, endY);
     }
@@ -594,8 +591,8 @@ public partial class MainViewModel : ViewModelBase
         ConnectionHoverZone = null;
         ConnectionHoverSide = PinSide.Left;
         StatusText = side == PinSide.Error
-            ? "Drag error / exit pin to a handler state"
-            : "Drag to an input pin";
+            ? "Drag error / exit pin to another pin"
+            : "Drop on another pin to connect";
         NotifyGraphChanged();
     }
 
@@ -621,9 +618,6 @@ public partial class MainViewModel : ViewModelBase
 
     public bool TryCompleteConnectionDragToZone(ZoneViewModel targetZone, PinSide targetSide)
     {
-        if (!ZoneFlow.IsInputSide(targetSide))
-            return false;
-
         return TryCompleteConnectionDragCore(
             targetZone.GetEnterBox(), targetStep: null, targetZone, targetSide);
     }

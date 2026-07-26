@@ -163,25 +163,6 @@ public partial class StateBoxViewModel : ViewModelBase
         Main.NotifyGraphChanged();
     }
 
-    public (double X, double Y) GetStepPinPosition(StateStepViewModel? step, bool isOutput)
-    {
-        const double headerHeight = 34;
-        const double stepHeight = 42;
-        const double padding = 12;
-
-        var index = step is null ? -1 : Steps.IndexOf(step);
-        var y = Y + headerHeight + padding + Math.Max(0, index) * stepHeight + stepHeight / 2;
-        var x = isOutput ? X + Width : X;
-        return (x, y);
-    }
-
-    public (double X, double Y) GetBoxPinPosition(bool isOutput)
-    {
-        var y = Y + 34;
-        var x = isOutput ? X + Width : X;
-        return (x, y);
-    }
-
     public (double X, double Y) GetStepPinPosition(StateStepViewModel? step, PinSide side)
     {
         if (side == PinSide.Error && step is not null)

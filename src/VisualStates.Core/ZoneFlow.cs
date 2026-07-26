@@ -4,7 +4,8 @@ namespace VisualStates.Core;
 
 /// <summary>
 /// Visual enter/exit flow for zones: children ordered top-to-bottom then left-to-right.
-/// Left/Top pins enter the first child; Right/Bottom pins leave the last child.
+/// The first child is the entry point; the last is the exit point.
+/// Pins themselves are direction-agnostic — the user picks source and target by drag.
 /// </summary>
 public static class ZoneFlow
 {
@@ -34,9 +35,4 @@ public static class ZoneFlow
         var last = children[^1];
         return (last.Id, last.Steps.Count > 0 ? last.Steps[^1].Id : null);
     }
-
-    public static bool IsInputSide(PinSide side) => side is PinSide.Left or PinSide.Top;
-
-    public static bool IsOutputSide(PinSide side) =>
-        side is PinSide.Right or PinSide.Bottom or PinSide.Error;
 }

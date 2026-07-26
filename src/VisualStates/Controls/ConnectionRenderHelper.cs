@@ -9,7 +9,6 @@ internal readonly record struct GraphPin(
     StateBoxViewModel? Box,
     ZoneViewModel? Zone,
     StateStepViewModel? Step,
-    bool IsOutput,
     PinSide Side)
 {
     public bool IsZone => Zone is not null;

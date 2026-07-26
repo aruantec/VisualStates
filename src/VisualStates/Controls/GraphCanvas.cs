@@ -395,28 +395,12 @@ public class GraphCanvas : Control
         var screenPoint = point.Position;
         var graphPoint = ScreenToGraph(screenPoint);
 
-        var pin = HitTestPin(graphPoint, inputOnly: false, outputOnly: false);
+        var pin = HitTestPin(graphPoint);
         if (pin is not null)
         {
-            if (pin.Value.IsOutput)
-            {
-                if (pin.Value.Zone is not null)
-                    ViewModel.StartConnectionDragFromZone(pin.Value.Zone, pin.Value.Side, graphPoint.X, graphPoint.Y);
-                else
-                    ViewModel.StartConnectionDrag(pin.Value.Box!, pin.Value.Step, pin.Value.Side, graphPoint.X, graphPoint.Y);
-
-                if (ViewModel.IsConnecting)
-                {
-                    _isDraggingConnection = true;
-                    Focus();
-                    e.Pointer.Capture(this);
-                    e.Handled = true;
-                    InvalidateVisual();
-                }
-
-                return;
-            }
-
+            // Pins are direction-agnostic: the pin where the drag starts is the source,
+            // and the pin where the user drops is the target. Direction is therefore
+            // defined entirely by the drag gesture itself.
             if (ViewModel.IsConnecting)
             {
                 if (pin.Value.Zone is not null)
@@ -431,12 +415,18 @@ public class GraphCanvas : Control
                 return;
             }
 
-            if (pin.Value.Box is not null)
+            if (pin.Value.Zone is not null)
+                ViewModel.StartConnectionDragFromZone(pin.Value.Zone, pin.Value.Side, graphPoint.X, graphPoint.Y);
+            else
+                ViewModel.StartConnectionDrag(pin.Value.Box!, pin.Value.Step, pin.Value.Side, graphPoint.X, graphPoint.Y);
+
+            if (ViewModel.IsConnecting)
             {
-                ViewModel.SelectBoxCommand.Execute(pin.Value.Box);
-                _dragBox = pin.Value.Box;
-                _dragStart = graphPoint;
+                _isDraggingConnection = true;
+                Focus();
+                e.Pointer.Capture(this);
                 e.Handled = true;
+                InvalidateVisual();
             }
 
             return;
@@ -507,14 +497,14 @@ public class GraphCanvas : Control
         if (_isDraggingConnection)
         {
             var graphPoint = ScreenToGraph(e.GetCurrentPoint(this).Position);
-            var inputPin = HitTestPin(graphPoint, inputOnly: true, outputOnly: false);
+            var hoverPin = HitTestPin(graphPoint);
             ViewModel.UpdateConnectionDrag(
                 graphPoint.X,
                 graphPoint.Y,
-                inputPin?.Box,
-                inputPin?.Step,
-                inputPin?.Side ?? PinSide.Left,
-                inputPin?.Zone);
+                hoverPin?.Box,
+                hoverPin?.Step,
+                hoverPin?.Side ?? PinSide.Left,
+                hoverPin?.Zone);
             InvalidateVisual();
             return;
         }
@@ -599,7 +589,7 @@ public class GraphCanvas : Control
             return;
         }
 
-        var pin = HitTestPin(graphPoint, inputOnly: false, outputOnly: false);
+        var pin = HitTestPin(graphPoint);
         if (pin is not { Side: PinSide.Error })
         {
             ToolTip.SetTip(this, null);
@@ -662,13 +652,13 @@ public class GraphCanvas : Control
         if (_isDraggingConnection && ViewModel is not null)
         {
             var graphPoint = ScreenToGraph(e.GetCurrentPoint(this).Position);
-            var inputPin = HitTestPin(graphPoint, inputOnly: true, outputOnly: false);
-            if (inputPin is not null)
+            var hoverPin = HitTestPin(graphPoint);
+            if (hoverPin is not null)
             {
-                if (inputPin.Value.Zone is not null)
-                    ViewModel.TryCompleteConnectionDragToZone(inputPin.Value.Zone, inputPin.Value.Side);
+                if (hoverPin.Value.Zone is not null)
+                    ViewModel.TryCompleteConnectionDragToZone(hoverPin.Value.Zone, hoverPin.Value.Side);
                 else
-                    ViewModel.TryCompleteConnectionDrag(inputPin.Value.Box!, inputPin.Value.Step, inputPin.Value.Side);
+                    ViewModel.TryCompleteConnectionDrag(hoverPin.Value.Box!, hoverPin.Value.Step, hoverPin.Value.Side);
             }
             else
                 ViewModel.CancelConnectionCommand.Execute(null);
@@ -1075,15 +1065,15 @@ public class GraphCanvas : Control
         if (ViewModel is null || !ViewModel.IsConnecting)
             return false;
 
-        var isOutput = side is PinSide.Right or PinSide.Bottom or PinSide.Error;
-        if (isOutput)
-        {
-            return ViewModel.ConnectionSourceZone is null
-                && ViewModel.ConnectionSourceBox == box
-                && ViewModel.ConnectionSourceStep == step
-                && ViewModel.ConnectionSourceSide == side;
-        }
+        // Source pin highlight: the pin where the drag started.
+        var isSource = ViewModel.ConnectionSourceZone is null
+            && ViewModel.ConnectionSourceBox == box
+            && ViewModel.ConnectionSourceStep == step
+            && ViewModel.ConnectionSourceSide == side;
+        if (isSource)
+            return true;
 
+        // Target pin highlight: whichever pin the cursor is currently over.
         return ViewModel.ConnectionHoverZone is null
             && ViewModel.ConnectionHoverBox == box
             && ViewModel.ConnectionHoverStep == step
@@ -1095,16 +1085,14 @@ public class GraphCanvas : Control
         if (ViewModel is null || !ViewModel.IsConnecting)
             return false;
 
-        var isOutput = side is PinSide.Right or PinSide.Bottom or PinSide.Error;
-        if (isOutput)
-            return ViewModel.ConnectionSourceZone == zone && ViewModel.ConnectionSourceSide == side;
+        if (ViewModel.ConnectionSourceZone == zone && ViewModel.ConnectionSourceSide == side)
+            return true;
 
         return ViewModel.ConnectionHoverZone == zone && ViewModel.ConnectionHoverSide == side;
     }
 
     private static void DrawPin(DrawingContext context, (double X, double Y) point, PinSide side, bool isHighlighted)
     {
-        var isOutput = side is PinSide.Right or PinSide.Bottom or PinSide.Error;
         var isError = side == PinSide.Error;
         Color fill;
         Color stroke;
@@ -1120,7 +1108,7 @@ public class GraphCanvas : Control
         }
         else
         {
-            fill = isOutput ? Color.FromRgb(240, 240, 240) : Color.FromRgb(200, 200, 200);
+            fill = Color.FromRgb(240, 240, 240);
             stroke = Color.FromRgb(30, 30, 30);
         }
 
@@ -1159,101 +1147,84 @@ public class GraphCanvas : Control
         return (null, null);
     }
 
-    private GraphPin? HitTestPin(Point graphPoint, bool inputOnly, bool outputOnly)
+    private GraphPin? HitTestPin(Point graphPoint)
     {
         for (var i = ViewModel!.Boxes.Count - 1; i >= 0; i--)
         {
             var box = ViewModel.Boxes[i];
             foreach (var step in box.Steps)
             {
-                if (!inputOnly)
-                {
-                    if (ShowsOwnErrorPin(box))
-                    {
-                        var error = box.GetStepErrorPinPosition(step);
-                        if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, error.X, error.Y))
-                            return new GraphPin(box, Zone: null, step, IsOutput: true, Side: PinSide.Error);
-                    }
-
-                    var right = box.GetStepPinPosition(step, PinSide.Right);
-                    if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, right.X, right.Y))
-                        return new GraphPin(box, Zone: null, step, IsOutput: true, Side: PinSide.Right);
-
-                    var bottom = box.GetStepPinPosition(step, PinSide.Bottom);
-                    if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, bottom.X, bottom.Y))
-                        return new GraphPin(box, Zone: null, step, IsOutput: true, Side: PinSide.Bottom);
-                }
-
-                if (!outputOnly)
-                {
-                    var left = box.GetStepPinPosition(step, PinSide.Left);
-                    if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, left.X, left.Y))
-                        return new GraphPin(box, Zone: null, step, IsOutput: false, Side: PinSide.Left);
-
-                    var top = box.GetStepPinPosition(step, PinSide.Top);
-                    if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, top.X, top.Y))
-                        return new GraphPin(box, Zone: null, step, IsOutput: false, Side: PinSide.Top);
-                }
-            }
-
-            if (!inputOnly)
-            {
                 if (ShowsOwnErrorPin(box))
                 {
-                    var boxError = box.GetBoxErrorPinPosition();
-                    if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxError.X, boxError.Y))
-                        return new GraphPin(box, Zone: null, null, IsOutput: true, Side: PinSide.Error);
+                    var error = box.GetStepErrorPinPosition(step);
+                    if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, error.X, error.Y))
+                        return new GraphPin(box, Zone: null, step, Side: PinSide.Error);
                 }
 
-                var boxRight = box.GetBoxPinPosition(PinSide.Right);
-                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxRight.X, boxRight.Y))
-                    return new GraphPin(box, Zone: null, null, IsOutput: true, Side: PinSide.Right);
+                var right = box.GetStepPinPosition(step, PinSide.Right);
+                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, right.X, right.Y))
+                    return new GraphPin(box, Zone: null, step, Side: PinSide.Right);
 
-                var boxBottom = box.GetBoxPinPosition(PinSide.Bottom);
-                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxBottom.X, boxBottom.Y))
-                    return new GraphPin(box, Zone: null, null, IsOutput: true, Side: PinSide.Bottom);
+                var bottom = box.GetStepPinPosition(step, PinSide.Bottom);
+                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, bottom.X, bottom.Y))
+                    return new GraphPin(box, Zone: null, step, Side: PinSide.Bottom);
+
+                var left = box.GetStepPinPosition(step, PinSide.Left);
+                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, left.X, left.Y))
+                    return new GraphPin(box, Zone: null, step, Side: PinSide.Left);
+
+                var top = box.GetStepPinPosition(step, PinSide.Top);
+                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, top.X, top.Y))
+                    return new GraphPin(box, Zone: null, step, Side: PinSide.Top);
             }
 
-            if (!outputOnly)
+            if (ShowsOwnErrorPin(box))
             {
-                var boxLeft = box.GetBoxPinPosition(PinSide.Left);
-                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxLeft.X, boxLeft.Y))
-                    return new GraphPin(box, Zone: null, null, IsOutput: false, Side: PinSide.Left);
-
-                var boxTop = box.GetBoxPinPosition(PinSide.Top);
-                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxTop.X, boxTop.Y))
-                    return new GraphPin(box, Zone: null, null, IsOutput: false, Side: PinSide.Top);
+                var boxError = box.GetBoxErrorPinPosition();
+                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxError.X, boxError.Y))
+                    return new GraphPin(box, Zone: null, null, Side: PinSide.Error);
             }
+
+            var boxRight = box.GetBoxPinPosition(PinSide.Right);
+            if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxRight.X, boxRight.Y))
+                return new GraphPin(box, Zone: null, null, Side: PinSide.Right);
+
+            var boxBottom = box.GetBoxPinPosition(PinSide.Bottom);
+            if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxBottom.X, boxBottom.Y))
+                return new GraphPin(box, Zone: null, null, Side: PinSide.Bottom);
+
+            var boxLeft = box.GetBoxPinPosition(PinSide.Left);
+            if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxLeft.X, boxLeft.Y))
+                return new GraphPin(box, Zone: null, null, Side: PinSide.Left);
+
+            var boxTop = box.GetBoxPinPosition(PinSide.Top);
+            if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, boxTop.X, boxTop.Y))
+                return new GraphPin(box, Zone: null, null, Side: PinSide.Top);
         }
 
         for (var i = ViewModel.Zones.Count - 1; i >= 0; i--)
         {
             var zone = ViewModel.Zones[i];
-            if (!inputOnly)
-            {
-                var error = zone.GetPinPosition(PinSide.Error);
-                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, error.X, error.Y))
-                    return new GraphPin(Box: null, zone, Step: null, IsOutput: true, Side: PinSide.Error);
 
-                var right = zone.GetPinPosition(PinSide.Right);
-                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, right.X, right.Y))
-                    return new GraphPin(Box: null, zone, Step: null, IsOutput: true, Side: PinSide.Right);
+            var error = zone.GetPinPosition(PinSide.Error);
+            if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, error.X, error.Y))
+                return new GraphPin(Box: null, zone, Step: null, Side: PinSide.Error);
 
-                var bottom = zone.GetPinPosition(PinSide.Bottom);
-                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, bottom.X, bottom.Y))
-                    return new GraphPin(Box: null, zone, Step: null, IsOutput: true, Side: PinSide.Bottom);
-            }
+            var right = zone.GetPinPosition(PinSide.Right);
+            if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, right.X, right.Y))
+                return new GraphPin(Box: null, zone, Step: null, Side: PinSide.Right);
 
-            if (!outputOnly)
-            {
-                var left = zone.GetPinPosition(PinSide.Left);
-                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, left.X, left.Y))
-                    return new GraphPin(Box: null, zone, Step: null, IsOutput: false, Side: PinSide.Left);
+            var bottom = zone.GetPinPosition(PinSide.Bottom);
+            if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, bottom.X, bottom.Y))
+                return new GraphPin(Box: null, zone, Step: null, Side: PinSide.Bottom);
 
-                var top = zone.GetPinPosition(PinSide.Top);
-                if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, top.X, top.Y))
-                    return new GraphPin(Box: null, zone, Step: null, IsOutput: false, Side: PinSide.Top);
-            }
+            var left = zone.GetPinPosition(PinSide.Left);
+            if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, left.X, left.Y))
+                return new GraphPin(Box: null, zone, Step: null, Side: PinSide.Left);
+
+            var top = zone.GetPinPosition(PinSide.Top);
+            if (ConnectionRenderHelper.IsNearPin(graphPoint.X, graphPoint.Y, top.X, top.Y))
+                return new GraphPin(Box: null, zone, Step: null, Side: PinSide.Top);
         }
 
         return null;
