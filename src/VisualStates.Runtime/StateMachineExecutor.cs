@@ -3,20 +3,57 @@ using VisualStates.Core.Models;
 
 namespace VisualStates.Runtime;
 
+/// <summary>
+/// Host-supplied context used by generated and interpreted state machines to
+/// raise events, invoke methods, and resolve services.
+/// </summary>
 public interface IStateMachineContext
 {
+    /// <summary>Raises a named event asynchronously.</summary>
+    /// <param name="eventName">Event identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task RaiseEventAsync(string eventName, CancellationToken cancellationToken = default);
+
+    /// <summary>Invokes a named host method asynchronously.</summary>
+    /// <param name="methodName">Method identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task InvokeMethodAsync(string methodName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves a host service of type <typeparamref name="T"/>, or returns
+    /// <see langword="null"/> when unavailable.
+    /// </summary>
+    /// <typeparam name="T">Service type.</typeparam>
     T? GetService<T>() where T : class;
 }
 
+/// <summary>
+/// Contract implemented by code generated from a <see cref="StateProject"/>.
+/// </summary>
 public interface IGeneratedStateMachine
 {
+    /// <summary>
+    /// Runs the generated state machine against <paramref name="context"/>.
+    /// </summary>
+    /// <param name="context">Host context for events and method calls.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task RunAsync(IStateMachineContext context, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Interprets a <see cref="StateProject"/> at runtime without emitting C# source:
+/// plans a topological execution order, runs each step, and diverts to error
+/// handlers when a step throws.
+/// </summary>
 public sealed class StateMachineExecutor
 {
+    /// <summary>
+    /// Executes <paramref name="project"/> against <paramref name="context"/>,
+    /// stopping after the first handled error branch.
+    /// </summary>
+    /// <param name="project">Project graph to interpret.</param>
+    /// <param name="context">Host context for events and method calls.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task ExecuteAsync(
         StateProject project,
         IStateMachineContext context,
@@ -41,8 +78,16 @@ public sealed class StateMachineExecutor
     }
 }
 
+/// <summary>
+/// Builds topological execution plans and error-handler maps for a project.
+/// </summary>
 internal static class ExecutionPlanner
 {
+    /// <summary>
+    /// Returns steps in a topological order derived from happy-path connections
+    /// and zone visual chaining.
+    /// </summary>
+    /// <param name="project">Project to plan.</param>
     public static IReadOnlyList<RuntimeStep> Plan(StateProject project)
     {
         var steps = new List<RuntimeStep>();
@@ -147,6 +192,11 @@ internal static class ExecutionPlanner
         return ordered;
     }
 
+    /// <summary>
+    /// Maps each step key to the runtime step that should run when that step throws,
+    /// based on error-pin connections (zone-level, then step-level, then box-level).
+    /// </summary>
+    /// <param name="project">Project whose error pins to inspect.</param>
     public static IReadOnlyDictionary<RuntimeStepKey, RuntimeStep> BuildErrorHandlers(StateProject project)
     {
         var allSteps = new Dictionary<RuntimeStepKey, RuntimeStep>();
@@ -279,8 +329,20 @@ internal static class ExecutionPlanner
             : new RuntimeStepKey(box.Id, null);
 }
 
+/// <summary>
+/// Identity of a runtime step: a box id plus an optional step id.
+/// </summary>
+/// <param name="BoxId">Owning box id.</param>
+/// <param name="StepId">Step id, or null for an empty box.</param>
 internal readonly record struct RuntimeStepKey(string BoxId, string? StepId)
 {
+    /// <summary>
+    /// Builds a key for <paramref name="boxId"/>/<paramref name="stepId"/>,
+    /// falling back to the box's last step when the step id is missing or unknown.
+    /// </summary>
+    /// <param name="project">Project used to resolve the box.</param>
+    /// <param name="boxId">Box id.</param>
+    /// <param name="stepId">Optional step id.</param>
     public static RuntimeStepKey From(StateProject project, string boxId, string? stepId)
     {
         var box = project.FindBox(boxId);
@@ -297,8 +359,17 @@ internal readonly record struct RuntimeStepKey(string BoxId, string? StepId)
     }
 }
 
+/// <summary>
+/// Executable wrapper around a <see cref="StateBox"/> and optional <see cref="StateStep"/>.
+/// </summary>
 internal sealed class RuntimeStep
 {
+    /// <summary>
+    /// Creates a runtime step for <paramref name="box"/> and optional
+    /// <paramref name="step"/>.
+    /// </summary>
+    /// <param name="box">Owning box.</param>
+    /// <param name="step">Step to run, or null for a no-op empty box.</param>
     public RuntimeStep(StateBox box, StateStep? step)
     {
         Box = box;
@@ -306,10 +377,21 @@ internal sealed class RuntimeStep
         Key = new RuntimeStepKey(box.Id, step?.Id);
     }
 
+    /// <summary>Owning state box.</summary>
     public StateBox Box { get; }
+
+    /// <summary>Step to execute, or null for an empty box.</summary>
     public StateStep? Step { get; }
+
+    /// <summary>Stable key used for planning and error-handler lookup.</summary>
     public RuntimeStepKey Key { get; }
 
+    /// <summary>
+    /// Executes this step against <paramref name="context"/> according to
+    /// <see cref="StateStep.Kind"/>.
+    /// </summary>
+    /// <param name="context">Host context.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task ExecuteAsync(IStateMachineContext context, CancellationToken cancellationToken)
     {
         if (Step is null)

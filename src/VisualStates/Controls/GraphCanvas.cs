@@ -11,13 +11,27 @@ using VisualStates.ViewModels;
 
 namespace VisualStates.Controls;
 
+/// <summary>
+/// Custom Avalonia control that renders the state graph (grid, zones, boxes, pins)
+/// and handles pointer interaction including pan, zoom, box/zone drag, and connection drag.
+/// </summary>
 public class GraphCanvas : Control
 {
+    /// <summary>Height of a state box header, in graph coordinates.</summary>
     public const double HeaderHeight = 34;
+
+    /// <summary>Height of each step row inside a state box, in graph coordinates.</summary>
     public const double StepHeight = 42;
+
+    /// <summary>Vertical padding around the step list within a box body.</summary>
     public const double StepPadding = 12;
+
+    /// <summary>Horizontal inset applied to step rectangles from the box edges.</summary>
     public const double StepInset = 10;
 
+    /// <summary>
+    /// Identifies the <see cref="ViewModel"/> dependency property.
+    /// </summary>
     public static readonly StyledProperty<MainViewModel?> ViewModelProperty =
         AvaloniaProperty.Register<GraphCanvas, MainViewModel?>(nameof(ViewModel));
 
@@ -45,6 +59,7 @@ public class GraphCanvas : Control
 
     private const double ViewClickThreshold = 4;
 
+    /// <summary>Initializes the control and the smooth zoom animation timer.</summary>
     public GraphCanvas()
     {
         _zoomTimer = new DispatcherTimer
@@ -60,6 +75,8 @@ public class GraphCanvas : Control
         ClipToBoundsProperty.OverrideDefaultValue<GraphCanvas>(true);
     }
 
+    /// <inheritdoc />
+    /// <remarks>Subscribes to or unsubscribes from the bound <see cref="ViewModel"/> when it changes.</remarks>
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -74,6 +91,8 @@ public class GraphCanvas : Control
         InvalidateVisual();
     }
 
+    /// <inheritdoc />
+    /// <remarks>Hooks the <see cref="ViewModel"/> when the control is attached if not already hooked.</remarks>
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -84,6 +103,8 @@ public class GraphCanvas : Control
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>Stops zoom animation and unhooks the view model when detached.</remarks>
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         StopZoomAnimation();
@@ -255,12 +276,17 @@ public class GraphCanvas : Control
     private void OnStepPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args) =>
         InvalidateVisual();
 
+    /// <summary>
+    /// Gets or sets the view model that supplies graph data and receives interaction commands.
+    /// </summary>
     public MainViewModel? ViewModel
     {
         get => GetValue(ViewModelProperty);
         set => SetValue(ViewModelProperty, value);
     }
 
+    /// <inheritdoc />
+    /// <remarks>Applies smooth zoom centered on the wheel position via <see cref="ApplyZoomAt"/>.</remarks>
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
@@ -271,6 +297,12 @@ public class GraphCanvas : Control
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Zooms the graph by <paramref name="factor"/> while keeping the graph point under
+    /// <paramref name="screenPoint"/> fixed on screen.
+    /// </summary>
+    /// <param name="screenPoint">Cursor position in control coordinates.</param>
+    /// <param name="factor">Multiplicative zoom factor (values above 1 zoom in).</param>
     internal void ApplyZoomAt(Point screenPoint, double factor)
     {
         if (ViewModel is null || Math.Abs(factor - 1.0) < 1e-6)
@@ -279,6 +311,13 @@ public class GraphCanvas : Control
         BeginOrRetargetSmoothZoom(screenPoint, factor);
     }
 
+    /// <summary>
+    /// Starts or retargets smooth zoom animation, keeping the graph point under the cursor stable.
+    /// </summary>
+    /// <remarks>
+    /// Keeps the graph point under the cursor stable (Maps / iOS pinch feel).
+    /// Accumulates onto the in-flight target so fast flicks feel continuous.
+    /// </remarks>
     private void BeginOrRetargetSmoothZoom(Point screenPoint, double factor)
     {
         if (ViewModel is null)
@@ -367,14 +406,34 @@ public class GraphCanvas : Control
         pointer?.Capture(null);
     }
 
+    /// <summary>
+    /// Gets whether the user is currently panning the graph view.
+    /// </summary>
     internal bool IsViewPanning => _isPanning;
 
+    /// <summary>Forwards a pointer-pressed event to <see cref="OnPointerPressed"/>.</summary>
+    /// <param name="e">The pointer event arguments.</param>
     internal void HandlePointerPressed(PointerPressedEventArgs e) => OnPointerPressed(e);
 
+    /// <summary>Forwards a pointer-moved event to <see cref="OnPointerMoved"/>.</summary>
+    /// <param name="e">The pointer event arguments.</param>
     internal void HandlePointerMoved(PointerEventArgs e) => OnPointerMoved(e);
 
+    /// <summary>Forwards a pointer-released event to <see cref="OnPointerReleased"/>.</summary>
+    /// <param name="e">The pointer event arguments.</param>
     internal void HandlePointerReleased(PointerReleasedEventArgs e) => OnPointerReleased(e);
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>Handles middle-button or Shift+left-button pan, pin hits, box/zone selection and drag,
+    /// and background pan with click-to-select.</para>
+    /// <para>
+    /// Connection drag: pins are direction-agnostic — any pin under the cursor can start or complete a drag.
+    /// The pin where the drag starts is the source; the pin where the user drops is the target.
+    /// If <see cref="MainViewModel.IsConnecting"/> is already true, pressing a pin completes the drag
+    /// to that pin (box/step or zone). Otherwise, pressing a pin starts a new connection drag from it.
+    /// </para>
+    /// </remarks>
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
@@ -478,6 +537,8 @@ public class GraphCanvas : Control
         e.Handled = true;
     }
 
+    /// <inheritdoc />
+    /// <remarks>Updates pan, connection drag hover, box/zone drag, resize, and hover cursors.</remarks>
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
@@ -565,6 +626,8 @@ public class GraphCanvas : Control
         UpdateErrorPinTooltip(ScreenToGraph(e.GetCurrentPoint(this).Position));
     }
 
+    /// <inheritdoc />
+    /// <remarks>Resets the cursor and clears the error-pin tooltip when the pointer leaves the control.</remarks>
     protected override void OnPointerExited(PointerEventArgs e)
     {
         base.OnPointerExited(e);
@@ -645,6 +708,8 @@ public class GraphCanvas : Control
         box.Y = Math.Clamp(box.Y, minY, Math.Max(minY, maxY));
     }
 
+    /// <inheritdoc />
+    /// <remarks>Completes or cancels connection drags, finalizes box/zone moves, and ends view pan.</remarks>
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
@@ -708,6 +773,8 @@ public class GraphCanvas : Control
         ResetCursor();
     }
 
+    /// <inheritdoc />
+    /// <remarks>Handles Delete (remove selection) and Escape (cancel connection drag).</remarks>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -731,6 +798,11 @@ public class GraphCanvas : Control
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Draws the graph in order: background grid, zones (with pins), then state boxes (with steps and pins).
+    /// Applies the current pan and zoom transform from <see cref="ViewModel"/>.
+    /// </remarks>
     public override void Render(DrawingContext context)
     {
         base.Render(context);
@@ -1060,6 +1132,16 @@ public class GraphCanvas : Control
     private static Rect GetStepRect(StateBoxViewModel box, double y) =>
         new(box.X + StepInset, y, box.Width - StepInset * 2, 34);
 
+    /// <summary>
+    /// Returns whether the given box or step pin should be drawn highlighted during a connection drag.
+    /// </summary>
+    /// <param name="box">The state box that owns the pin.</param>
+    /// <param name="step">The step pin, or <see langword="null"/> for a box-level pin.</param>
+    /// <param name="side">Which side of the box or step the pin is on.</param>
+    /// <returns>
+    /// <see langword="true"/> if this pin is the drag source (where the drag started) or the current
+    /// hover target (drop pin under the cursor).
+    /// </returns>
     private bool IsPinHighlighted(StateBoxViewModel box, StateStepViewModel? step, PinSide side)
     {
         if (ViewModel is null || !ViewModel.IsConnecting)
@@ -1080,6 +1162,14 @@ public class GraphCanvas : Control
             && ViewModel.ConnectionHoverSide == side;
     }
 
+    /// <summary>
+    /// Returns whether the given zone pin should be drawn highlighted during a connection drag.
+    /// </summary>
+    /// <param name="zone">The zone that owns the pin.</param>
+    /// <param name="side">Which side of the zone the pin is on.</param>
+    /// <returns>
+    /// <see langword="true"/> if this pin is the drag source or the current hover target.
+    /// </returns>
     private bool IsZonePinHighlighted(ZoneViewModel zone, PinSide side)
     {
         if (ViewModel is null || !ViewModel.IsConnecting)
@@ -1091,6 +1181,15 @@ public class GraphCanvas : Control
         return ViewModel.ConnectionHoverZone == zone && ViewModel.ConnectionHoverSide == side;
     }
 
+    /// <summary>
+    /// Draws a single connection pin at the given graph position.
+    /// </summary>
+    /// <param name="context">The drawing context.</param>
+    /// <param name="point">Pin center in graph coordinates.</param>
+    /// <param name="side">Pin side (affects error styling).</param>
+    /// <param name="isHighlighted">
+    /// When <see langword="true"/>, draws the pin enlarged and in the connection-drag accent color.
+    /// </param>
     private static void DrawPin(DrawingContext context, (double X, double Y) point, PinSide side, bool isHighlighted)
     {
         var isError = side == PinSide.Error;
@@ -1147,6 +1246,14 @@ public class GraphCanvas : Control
         return (null, null);
     }
 
+    /// <summary>
+    /// Returns the topmost pin under the cursor, regardless of pin side or direction.
+    /// </summary>
+    /// <param name="graphPoint">Point in graph coordinates.</param>
+    /// <returns>
+    /// The hit pin (box/step or zone), or <see langword="null"/> if no pin is within hit tolerance.
+    /// Used for connection drag start and drop; drag start pin is the source, drop pin is the target.
+    /// </returns>
     private GraphPin? HitTestPin(Point graphPoint)
     {
         for (var i = ViewModel!.Boxes.Count - 1; i >= 0; i--)

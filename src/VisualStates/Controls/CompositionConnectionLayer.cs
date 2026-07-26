@@ -8,8 +8,14 @@ using VisualStates.ViewModels;
 
 namespace VisualStates.Controls;
 
+/// <summary>
+/// Avalonia control that draws animated connection wires and the rubber-band drag preview above the graph canvas.
+/// </summary>
 public class CompositionConnectionLayer : Control
 {
+    /// <summary>
+    /// Identifies the <see cref="ViewModel"/> dependency property.
+    /// </summary>
     public static readonly StyledProperty<MainViewModel?> ViewModelProperty =
         AvaloniaProperty.Register<CompositionConnectionLayer, MainViewModel?>(nameof(ViewModel));
 
@@ -21,6 +27,10 @@ public class CompositionConnectionLayer : Control
     private const double FlowSpeed = 0.32;
     private const double DashPeriod = 100.0;
 
+    /// <summary>
+    /// Creates the connection layer and starts the animation timer used for
+    /// the flowing dash effect on wires.
+    /// </summary>
     public CompositionConnectionLayer()
     {
         _animationTimer = new DispatcherTimer
@@ -38,12 +48,16 @@ public class CompositionConnectionLayer : Control
         _animationTimer.Start();
     }
 
+    /// <summary>
+    /// Gets or sets the view model that supplies connection data, pan/zoom state, and drag-preview coordinates.
+    /// </summary>
     public MainViewModel? ViewModel
     {
         get => GetValue(ViewModelProperty);
         set => SetValue(ViewModelProperty, value);
     }
 
+    /// <inheritdoc />
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -58,6 +72,7 @@ public class CompositionConnectionLayer : Control
         InvalidateVisual();
     }
 
+    /// <inheritdoc />
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -68,6 +83,7 @@ public class CompositionConnectionLayer : Control
         }
     }
 
+    /// <inheritdoc />
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         UnhookViewModel(_hookedViewModel);
@@ -183,6 +199,7 @@ public class CompositionConnectionLayer : Control
         }
     }
 
+    /// <inheritdoc />
     public override void Render(DrawingContext context)
     {
         base.Render(context);
@@ -202,6 +219,13 @@ public class CompositionConnectionLayer : Control
         }
     }
 
+    /// <summary>
+    /// Draws the dashed rubber-band wire from the connection source pin to the current drag cursor position.
+    /// </summary>
+    /// <param name="context">The drawing context for the current render pass.</param>
+    /// <remarks>
+    /// Uses a rubber-band Bezier (not orthogonal stubs) so near-pin drags stay clean.
+    /// </remarks>
     private void DrawDragPreview(DrawingContext context)
     {
         var sourceSide = ViewModel!.ConnectionSourceSide;
@@ -229,23 +253,41 @@ public class CompositionConnectionLayer : Control
             ? hoverSide
             : InferDragTargetSide(sourceSide, x2, y2, x1, y1);
 
-        // Rubber-band Bezier (not orthogonal stubs) so near-pin drags stay clean.
         var geometry = ConnectionRenderHelper.CreateDragPreviewGeometry(
             x1, y1, sourceSide, x2, y2, targetSide);
 
         context.DrawGeometry(null, wirePen, geometry);
     }
 
+    /// <summary>
+    /// Infers which pin side the drag preview should route toward when the cursor is not over a pin.
+    /// </summary>
+    /// <param name="sourceSide">The side of the source pin where the drag started.</param>
+    /// <param name="x2">The drag cursor X coordinate in graph space.</param>
+    /// <param name="y2">The drag cursor Y coordinate in graph space.</param>
+    /// <param name="x1">The source pin X coordinate in graph space.</param>
+    /// <param name="y1">The source pin Y coordinate in graph space.</param>
+    /// <returns>
+    /// The inferred target <see cref="PinSide"/> based on the relative position of the cursor to the source pin.
+    /// </returns>
+    /// <remarks>
+    /// Error pins leave toward the right like a normal output.
+    /// </remarks>
     private static PinSide InferDragTargetSide(
         PinSide sourceSide, double x2, double y2, double x1, double y1)
     {
         if (sourceSide is PinSide.Top or PinSide.Bottom)
             return y2 < y1 ? PinSide.Bottom : PinSide.Top;
 
-        // Error pins leave toward the right like a normal output.
         return x2 < x1 ? PinSide.Right : PinSide.Left;
     }
 
+    /// <summary>
+    /// Draws a single routed connection wire with animated inner glow and a direction marker.
+    /// </summary>
+    /// <param name="context">The drawing context for the current render pass.</param>
+    /// <param name="connection">The connection view model whose selection and error state determine wire styling.</param>
+    /// <param name="points">The routed polyline points for the connection path.</param>
     private void DrawAnimatedConnection(
         DrawingContext context, ConnectionViewModel connection, IReadOnlyList<Point> points)
     {
@@ -272,6 +314,15 @@ public class CompositionConnectionLayer : Control
         DrawDirectionMarker(context, routePoint, markerColor);
     }
 
+    /// <summary>
+    /// Draws layered animated dash pulses along the inner edge of a connection wire to simulate flow.
+    /// </summary>
+    /// <param name="context">The drawing context for the current render pass.</param>
+    /// <param name="geometry">The connection path geometry along which pulses are drawn.</param>
+    /// <param name="wireWidth">The outer wire stroke width used to size the inner glow layers.</param>
+    /// <param name="selected">
+    /// When <see langword="true"/>, uses warm orange/yellow pulse colors; otherwise uses cool blue/cyan tones.
+    /// </param>
     private void DrawInnerGlowFlow(DrawingContext context, StreamGeometry geometry, double wireWidth, bool selected)
     {
         var pulse = 0.9 + 0.1 * Math.Sin(_flowPhase * Math.PI * 2);
@@ -293,6 +344,16 @@ public class CompositionConnectionLayer : Control
         DrawFlowPulse(context, geometry, Color.FromRgb(0, 255, 255), innerWidth - 0.2, 255, [6.0, 94.0], travelOffset);
     }
 
+    /// <summary>
+    /// Draws a single dashed pulse stroke along a connection path geometry.
+    /// </summary>
+    /// <param name="context">The drawing context for the current render pass.</param>
+    /// <param name="geometry">The path geometry to stroke.</param>
+    /// <param name="color">The base RGB color of the pulse; alpha is supplied separately.</param>
+    /// <param name="width">The stroke width of the pulse layer.</param>
+    /// <param name="alpha">The opacity of the pulse stroke.</param>
+    /// <param name="dash">The dash pattern lengths for the animated stroke.</param>
+    /// <param name="offset">The dash offset that advances with the animation phase.</param>
     private static void DrawFlowPulse(
         DrawingContext context,
         StreamGeometry geometry,
@@ -310,6 +371,12 @@ public class CompositionConnectionLayer : Control
         context.DrawGeometry(null, pen, geometry);
     }
 
+    /// <summary>
+    /// Creates a round-capped, round-joined pen for drawing connection wires and glow layers.
+    /// </summary>
+    /// <param name="color">The stroke color.</param>
+    /// <param name="width">The stroke width.</param>
+    /// <returns>A configured <see cref="Pen"/> with round line caps and joins.</returns>
     private static Pen CreateRoundPen(Color color, double width) =>
         new(new SolidColorBrush(color), width)
         {
@@ -317,6 +384,12 @@ public class CompositionConnectionLayer : Control
             LineJoin = PenLineJoin.Round
         };
 
+    /// <summary>
+    /// Draws a filled triangular arrowhead indicating connection flow direction at a route point.
+    /// </summary>
+    /// <param name="context">The drawing context for the current render pass.</param>
+    /// <param name="routePoint">The position and angle along the path where the marker is placed.</param>
+    /// <param name="color">The fill color of the direction marker.</param>
     private static void DrawDirectionMarker(DrawingContext context, RoutePoint routePoint, Color color)
     {
         var size = 7.0;

@@ -6,8 +6,19 @@ using VisualStates.Core.Models;
 
 namespace VisualStates.ViewModels;
 
+/// <summary>
+/// View-model for a state box on the graph canvas. Exposes layout, styling,
+/// child steps, and pin positions for connection routing.
+/// </summary>
 public partial class StateBoxViewModel : ViewModelBase
 {
+    /// <summary>
+    /// Creates a box view-model bound to <paramref name="model"/> and
+    /// <paramref name="main"/>, wrapping each step in a
+    /// <see cref="StateStepViewModel"/>.
+    /// </summary>
+    /// <param name="model">Underlying box model.</param>
+    /// <param name="main">Root editor view-model used for graph notifications and lookups.</param>
     public StateBoxViewModel(StateBox model, MainViewModel main)
     {
         Model = model;
@@ -17,12 +28,19 @@ public partial class StateBoxViewModel : ViewModelBase
             model.Steps.Select(step => new StateStepViewModel(step, this)));
     }
 
+    /// <summary>Underlying domain model.</summary>
     public StateBox Model { get; }
+
+    /// <summary>Owning editor view-model.</summary>
     public MainViewModel Main { get; }
+
+    /// <summary>Ordered collection of step view-models for this box.</summary>
     public ObservableCollection<StateStepViewModel> Steps { get; }
 
+    /// <summary>Box id (from the model).</summary>
     public string Id => Model.Id;
 
+    /// <summary>Display name of the box.</summary>
     public string Name
     {
         get => Model.Name;
@@ -36,6 +54,7 @@ public partial class StateBoxViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Canvas X coordinate of the box origin.</summary>
     public double X
     {
         get => Model.X;
@@ -50,6 +69,7 @@ public partial class StateBoxViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Canvas Y coordinate of the box origin.</summary>
     public double Y
     {
         get => Model.Y;
@@ -64,6 +84,7 @@ public partial class StateBoxViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Rendered width of the box body.</summary>
     public double Width
     {
         get => Model.Width;
@@ -78,6 +99,9 @@ public partial class StateBoxViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Whether this box is marked as an entry point in the state graph.
+    /// </summary>
     public bool IsEntry
     {
         get => Model.IsEntry;
@@ -91,6 +115,10 @@ public partial class StateBoxViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Header accent color as a normalized RGB string. Assigning blank values
+    /// picks a stable palette color from <see cref="Id"/>.
+    /// </summary>
     public string HeaderColor
     {
         get => BoxColorPalette.Normalize(Model.HeaderColor, Model.Id);
@@ -109,6 +137,7 @@ public partial class StateBoxViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Avalonia brush derived from <see cref="HeaderColor"/>.</summary>
     public IBrush HeaderBrush
     {
         get
@@ -118,6 +147,10 @@ public partial class StateBoxViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Ensures the model has a header color, assigning one from the palette
+    /// when unset.
+    /// </summary>
     public void EnsureHeaderColor()
     {
         if (!string.IsNullOrWhiteSpace(Model.HeaderColor))
@@ -128,9 +161,14 @@ public partial class StateBoxViewModel : ViewModelBase
         OnPropertyChanged(nameof(HeaderBrush));
     }
 
+    /// <summary>Whether this box is currently selected in the editor.</summary>
     [ObservableProperty]
     private bool _isSelected;
 
+    /// <summary>
+    /// Id of the parent zone that contains this box, or <see langword="null"/>
+    /// when the box is ungrouped.
+    /// </summary>
     public string? ZoneId
     {
         get => Model.ZoneId;
@@ -146,9 +184,18 @@ public partial class StateBoxViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Resolved parent zone view-model, or <see langword="null"/> when
+    /// <see cref="ZoneId"/> is unset or unknown.
+    /// </summary>
     public ZoneViewModel? ParentZone =>
         string.IsNullOrWhiteSpace(ZoneId) ? null : Main.FindZone(ZoneId);
 
+    /// <summary>
+    /// Appends a new step to the box model and exposes it in
+    /// <see cref="Steps"/>.
+    /// </summary>
+    /// <param name="step">Step model to add.</param>
     public void AddStep(StateStep step)
     {
         Model.Steps.Add(step);
@@ -156,6 +203,10 @@ public partial class StateBoxViewModel : ViewModelBase
         Main.NotifyGraphChanged();
     }
 
+    /// <summary>
+    /// Removes a step from the box model and from <see cref="Steps"/>.
+    /// </summary>
+    /// <param name="step">Step view-model to remove.</param>
     public void RemoveStep(StateStepViewModel step)
     {
         Model.Steps.Remove(step.Model);
@@ -163,6 +214,13 @@ public partial class StateBoxViewModel : ViewModelBase
         Main.NotifyGraphChanged();
     }
 
+    /// <summary>
+    /// Graph-space coordinates of a step connection pin, or the box-level pin
+    /// when <paramref name="step"/> is <see langword="null"/>.
+    /// </summary>
+    /// <param name="step">Target step, or <see langword="null"/> for the box header pin row.</param>
+    /// <param name="side">Edge or error pin to locate.</param>
+    /// <returns>Pin center in canvas coordinates.</returns>
     public (double X, double Y) GetStepPinPosition(StateStepViewModel? step, PinSide side)
     {
         if (side == PinSide.Error && step is not null)
@@ -177,6 +235,11 @@ public partial class StateBoxViewModel : ViewModelBase
         return PositionForSide(side, rowY);
     }
 
+    /// <summary>
+    /// Graph-space coordinates of a box-level connection pin on the header row.
+    /// </summary>
+    /// <param name="side">Edge or error pin to locate.</param>
+    /// <returns>Pin center in canvas coordinates.</returns>
     public (double X, double Y) GetBoxPinPosition(PinSide side)
     {
         if (side == PinSide.Error)
@@ -196,6 +259,12 @@ public partial class StateBoxViewModel : ViewModelBase
             _ => (X, rowY)
         };
 
+    /// <summary>
+    /// Graph-space coordinates of the dedicated error pin for
+    /// <paramref name="step"/> (top-right inset of the step row).
+    /// </summary>
+    /// <param name="step">Step whose error pin to locate.</param>
+    /// <returns>Error pin position in canvas coordinates.</returns>
     public (double X, double Y) GetStepErrorPinPosition(StateStepViewModel step)
     {
         const double headerHeight = 34;
@@ -208,9 +277,17 @@ public partial class StateBoxViewModel : ViewModelBase
         return (X + Width - stepInset, stepTop);
     }
 
+    /// <summary>
+    /// Graph-space coordinates of the box-level error pin (top-right corner).
+    /// </summary>
+    /// <returns>Error pin position in canvas coordinates.</returns>
     public (double X, double Y) GetBoxErrorPinPosition() =>
         (X + Width - 2, Y + 2);
 
+    /// <summary>
+    /// Total rendered height of the box, including header, steps, and padding.
+    /// </summary>
+    /// <returns>Height in canvas units.</returns>
     public double GetTotalHeight() =>
         34 + Math.Max(1, Steps.Count) * 42 + 24;
 }

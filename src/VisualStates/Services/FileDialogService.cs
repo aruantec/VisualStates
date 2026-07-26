@@ -3,15 +3,25 @@ using Avalonia.Platform.Storage;
 
 namespace VisualStates.Services;
 
+/// <summary>
+/// Avalonia <see cref="IStorageProvider"/>-backed implementation of
+/// <see cref="IFileDialogService"/>.
+/// </summary>
 public sealed class FileDialogService : IFileDialogService
 {
     private readonly Func<Window?> _windowProvider;
 
+    /// <summary>
+    /// Creates a dialog service that resolves the owner window via
+    /// <paramref name="windowProvider"/>.
+    /// </summary>
+    /// <param name="windowProvider">Lazy provider for the main window.</param>
     public FileDialogService(Func<Window?> windowProvider)
     {
         _windowProvider = windowProvider;
     }
 
+    /// <inheritdoc />
     public async Task<string?> PickOpenFileAsync(string title, string filterName, string extension)
     {
         var window = _windowProvider();
@@ -34,6 +44,7 @@ public sealed class FileDialogService : IFileDialogService
         return files.Count > 0 ? files[0].Path.LocalPath : null;
     }
 
+    /// <inheritdoc />
     public async Task<string?> PickSaveFileAsync(string title, string filterName, string extension, string? defaultFileName = null)
     {
         var window = _windowProvider();

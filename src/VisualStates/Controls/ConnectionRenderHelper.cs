@@ -5,33 +5,92 @@ using VisualStates.ViewModels;
 
 namespace VisualStates.Controls;
 
+/// <summary>
+/// Identifies a connection endpoint on the graph canvas.
+/// Pins are direction-agnostic: there is no output/input flag; <see cref="Side"/> describes
+/// only the geometric edge of the host box, zone, or step where the pin sits.
+/// </summary>
+/// <param name="Box">The state box that owns this pin, when the endpoint is on a box body.</param>
+/// <param name="Zone">The zone that owns this pin, when the endpoint is on a zone.</param>
+/// <param name="Step">The step within <paramref name="Box"/> that owns this pin, when the endpoint is on a step pin.</param>
+/// <param name="Side">The geometric edge (<see cref="PinSide.Left"/>, <see cref="PinSide.Right"/>, etc.) where the pin is anchored.</param>
 internal readonly record struct GraphPin(
     StateBoxViewModel? Box,
     ZoneViewModel? Zone,
     StateStepViewModel? Step,
     PinSide Side)
 {
+    /// <summary>
+    /// Gets a value indicating whether this pin belongs to a zone rather than a state box or step.
+    /// </summary>
     public bool IsZone => Zone is not null;
 }
 
+/// <summary>
+/// A position along a routed connection path together with the local tangent angle.
+/// </summary>
+/// <param name="X">Canvas X coordinate in diagram space.</param>
+/// <param name="Y">Canvas Y coordinate in diagram space.</param>
+/// <param name="Angle">Tangent direction at this point, in radians (same convention as <see cref="Math.Atan2(double, double)"/>).</param>
 internal readonly record struct RoutePoint(double X, double Y, double Angle);
 
+/// <summary>
+/// An axis-aligned bounding rectangle used as a routing obstacle for state boxes.
+/// </summary>
+/// <param name="Left">Left edge X coordinate.</param>
+/// <param name="Top">Top edge Y coordinate.</param>
+/// <param name="Right">Right edge X coordinate.</param>
+/// <param name="Bottom">Bottom edge Y coordinate.</param>
 internal readonly record struct BoxRect(double Left, double Top, double Right, double Bottom);
 
+/// <summary>
+/// Computes orthogonal and Bezier connection paths, hit-testing geometry, and pin positions
+/// for rendering state-machine wires on the canvas.
+/// </summary>
 internal static class ConnectionRenderHelper
 {
+    /// <summary>
+    /// Radius in diagram space used for hit-testing whether the cursor is near a pin.
+    /// </summary>
     public const double PinHitRadius = 10;
+
+    /// <summary>
+    /// Default radius in screen space used for hit-testing whether the cursor is near a connection wire.
+    /// </summary>
     public const double ConnectionHitRadiusScreen = 20;
+
+    /// <summary>Length of the straight stub segment extending outward from each pin before the route turns.</summary>
     private const double StubLength = 28;
+
+    /// <summary>Minimum separation between parallel routing lanes when nudging to avoid overlap.</summary>
     private const double LaneSpacing = 22;
+
+    /// <summary>Default clearance around box obstacles when testing whether a segment is blocked.</summary>
     private const double BoxClearance = 24;
+
     /// <summary>Tighter clearance for the bridge channel between stacked boxes.</summary>
     private const double BridgeClearance = 4;
+
+    /// <summary>Minimum span required before <see cref="TryFindChannel"/> searches for an in-band bridge channel.</summary>
     private const double MinBridgeGap = 10;
+
+    /// <summary>Distance threshold below which opposite-facing horizontal or vertical pins are treated as backward/overlapping.</summary>
     private const double BackwardThreshold = 12;
+
+    /// <summary>Maximum pin offset (in the cross axis) for treating two pins as aligned enough for a Bezier shortcut.</summary>
     private const double AlignThreshold = 10;
+
+    /// <summary>Number of line segments used when approximating a cubic Bezier as a polyline.</summary>
     private const int BezierSampleCount = 40;
 
+    /// <summary>
+    /// Finds the topmost connection whose routed path lies within <paramref name="hitRadiusScreen"/>
+    /// of <paramref name="screenPoint"/> in screen coordinates.
+    /// </summary>
+    /// <param name="vm">The main view model containing connections, pan, and zoom state.</param>
+    /// <param name="screenPoint">Cursor position in screen (control) coordinates.</param>
+    /// <param name="hitRadiusScreen">Maximum distance in screen pixels from the wire polyline.</param>
+    /// <returns>The closest matching <see cref="ConnectionViewModel"/>, or <see langword="null"/> if none are within range.</returns>
     public static ConnectionViewModel? FindConnectionAtScreen(
         MainViewModel vm,
         Point screenPoint,
@@ -56,9 +115,11 @@ internal static class ConnectionRenderHelper
     }
 
     /// <summary>
-    /// Routes every connection in order, reserving vertical/horizontal lanes so
+    /// Routes every connection in order, reserving vertical and horizontal lanes so
     /// later wires step aside instead of stacking on the same stub column.
     /// </summary>
+    /// <param name="vm">The main view model whose connections and boxes define the diagram.</param>
+    /// <returns>One polyline point list per connection, in the same order as <see cref="MainViewModel.Connections"/>.</returns>
     public static IReadOnlyList<IReadOnlyList<Point>> BuildAllConnectionPaths(MainViewModel vm)
     {
         var obstacles = BuildObstacles(vm);
@@ -84,9 +145,28 @@ internal static class ConnectionRenderHelper
         return paths;
     }
 
+    /// <summary>
+    /// Builds a <see cref="StreamGeometry"/> polyline from an already-computed route.
+    /// </summary>
+    /// <param name="points">Polyline vertices in diagram space.</param>
+    /// <returns>A geometry suitable for drawing the connection stroke.</returns>
     public static StreamGeometry CreateRoutedGeometry(IReadOnlyList<Point> points)
         => CreatePolylineGeometry(points);
 
+    /// <summary>
+    /// Computes a routed path between two pins and returns it as a <see cref="StreamGeometry"/> polyline.
+    /// </summary>
+    /// <param name="x1">Source pin X in diagram space.</param>
+    /// <param name="y1">Source pin Y in diagram space.</param>
+    /// <param name="sourceSide">Geometric side of the source pin.</param>
+    /// <param name="x2">Target pin X in diagram space.</param>
+    /// <param name="y2">Target pin Y in diagram space.</param>
+    /// <param name="targetSide">Geometric side of the target pin.</param>
+    /// <param name="routeIndex">Index used to stagger overlapping Bezier lanes.</param>
+    /// <param name="obstacles">Optional box rectangles to avoid; defaults to none.</param>
+    /// <param name="reservedVerticalLanes">Optional X coordinates already claimed by prior routes.</param>
+    /// <param name="reservedHorizontalLanes">Optional Y coordinates already claimed by prior routes.</param>
+    /// <returns>A geometry representing the routed connection.</returns>
     public static StreamGeometry CreateRoutedGeometry(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -103,8 +183,15 @@ internal static class ConnectionRenderHelper
 
     /// <summary>
     /// Rubber-band preview while dragging a new connection. Uses a distance-scaled
-    /// Bezier (not orthogonal stubs) so a near-pin cursor never draws a square/lasso.
+    /// Bezier (not orthogonal stubs) so a near-pin cursor never draws a square or lasso shape.
     /// </summary>
+    /// <param name="x1">Source pin X in diagram space.</param>
+    /// <param name="y1">Source pin Y in diagram space.</param>
+    /// <param name="sourceSide">Geometric side of the source pin.</param>
+    /// <param name="x2">Drag cursor or target pin X in diagram space.</param>
+    /// <param name="y2">Drag cursor or target pin Y in diagram space.</param>
+    /// <param name="targetSide">Geometric side of the tentative target pin.</param>
+    /// <returns>A smooth preview geometry following a cubic Bezier approximation.</returns>
     public static StreamGeometry CreateDragPreviewGeometry(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide)
@@ -139,9 +226,28 @@ internal static class ConnectionRenderHelper
         return CreatePolylineGeometry(SampleCubicBezier(p0, p1, p2, p3));
     }
 
+    /// <summary>
+    /// Returns a point and tangent angle at normalized distance <paramref name="t"/> along a polyline route.
+    /// </summary>
+    /// <param name="points">Polyline vertices in diagram space.</param>
+    /// <param name="t">Normalized distance along the path, in the range 0–1.</param>
+    /// <returns>A <see cref="RoutePoint"/> at the requested position.</returns>
     public static RoutePoint GetRoutePoint(IReadOnlyList<Point> points, double t = 0.55)
         => GetPointAlongPolyline(points, t);
 
+    /// <summary>
+    /// Routes between two pins and returns a point and tangent at normalized distance <paramref name="t"/> along the path.
+    /// </summary>
+    /// <param name="x1">Source pin X in diagram space.</param>
+    /// <param name="y1">Source pin Y in diagram space.</param>
+    /// <param name="sourceSide">Geometric side of the source pin.</param>
+    /// <param name="x2">Target pin X in diagram space.</param>
+    /// <param name="y2">Target pin Y in diagram space.</param>
+    /// <param name="targetSide">Geometric side of the target pin.</param>
+    /// <param name="routeIndex">Index used to stagger overlapping Bezier lanes.</param>
+    /// <param name="obstacles">Optional box rectangles to avoid.</param>
+    /// <param name="t">Normalized distance along the path, in the range 0–1.</param>
+    /// <returns>A <see cref="RoutePoint"/> suitable for placing labels or arrowheads.</returns>
     public static RoutePoint GetRoutePoint(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -152,6 +258,16 @@ internal static class ConnectionRenderHelper
         return GetPointAlongPolyline(points, t);
     }
 
+    /// <summary>
+    /// Computes the shortest distance from a screen-space point to a polyline after applying pan and zoom.
+    /// </summary>
+    /// <param name="points">Polyline vertices in diagram space.</param>
+    /// <param name="panX">Horizontal pan offset in screen pixels.</param>
+    /// <param name="panY">Vertical pan offset in screen pixels.</param>
+    /// <param name="zoom">Diagram-to-screen scale factor.</param>
+    /// <param name="screenX">Test point X in screen coordinates.</param>
+    /// <param name="screenY">Test point Y in screen coordinates.</param>
+    /// <returns>Distance in screen pixels, or <see cref="double.MaxValue"/> when <paramref name="points"/> has fewer than two vertices.</returns>
     public static double DistanceToPolylineScreen(
         IReadOnlyList<Point> points,
         double panX, double panY, double zoom, double screenX, double screenY)
@@ -172,6 +288,23 @@ internal static class ConnectionRenderHelper
         return min;
     }
 
+    /// <summary>
+    /// Routes between two pins and returns the screen-space distance from a point to that path.
+    /// </summary>
+    /// <param name="x1">Source pin X in diagram space.</param>
+    /// <param name="y1">Source pin Y in diagram space.</param>
+    /// <param name="sourceSide">Geometric side of the source pin.</param>
+    /// <param name="x2">Target pin X in diagram space.</param>
+    /// <param name="y2">Target pin Y in diagram space.</param>
+    /// <param name="targetSide">Geometric side of the target pin.</param>
+    /// <param name="routeIndex">Index used to stagger overlapping Bezier lanes.</param>
+    /// <param name="panX">Horizontal pan offset in screen pixels.</param>
+    /// <param name="panY">Vertical pan offset in screen pixels.</param>
+    /// <param name="zoom">Diagram-to-screen scale factor.</param>
+    /// <param name="screenX">Test point X in screen coordinates.</param>
+    /// <param name="screenY">Test point Y in screen coordinates.</param>
+    /// <param name="obstacles">Optional box rectangles to avoid.</param>
+    /// <returns>Distance in screen pixels from <paramref name="screenX"/>/<paramref name="screenY"/> to the routed wire.</returns>
     public static double DistanceToConnectionScreen(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -183,6 +316,13 @@ internal static class ConnectionRenderHelper
         return DistanceToPolylineScreen(points, panX, panY, zoom, screenX, screenY);
     }
 
+    /// <summary>
+    /// Resolves the diagram-space coordinates of a pin on a box body or on a specific step.
+    /// </summary>
+    /// <param name="box">The state box that owns the pin.</param>
+    /// <param name="step">The step pin to use, or <see langword="null"/> for a box-level pin.</param>
+    /// <param name="side">Geometric side of the pin.</param>
+    /// <returns>The pin position as (<c>X</c>, <c>Y</c>) in diagram space.</returns>
     public static (double X, double Y) GetPinPosition(StateBoxViewModel box, StateStepViewModel? step, PinSide side)
     {
         if (step is not null)
@@ -191,6 +331,15 @@ internal static class ConnectionRenderHelper
         return box.GetBoxPinPosition(side);
     }
 
+    /// <summary>
+    /// Determines whether a diagram-space point lies within a circular hit region around a pin.
+    /// </summary>
+    /// <param name="x">Test point X in diagram space.</param>
+    /// <param name="y">Test point Y in diagram space.</param>
+    /// <param name="pinX">Pin center X in diagram space.</param>
+    /// <param name="pinY">Pin center Y in diagram space.</param>
+    /// <param name="radius">Hit radius in diagram space; defaults to <see cref="PinHitRadius"/>.</param>
+    /// <returns><see langword="true"/> when the test point is inside the hit circle.</returns>
     public static bool IsNearPin(double x, double y, double pinX, double pinY, double radius = PinHitRadius)
     {
         var dx = x - pinX;
@@ -198,6 +347,21 @@ internal static class ConnectionRenderHelper
         return dx * dx + dy * dy <= radius * radius;
     }
 
+    /// <summary>
+    /// Computes the polyline vertices for a connection between two pins, choosing orthogonal
+    /// or Bezier routing based on pin sides, obstacles, and reserved lanes.
+    /// </summary>
+    /// <param name="x1">Source pin X in diagram space.</param>
+    /// <param name="y1">Source pin Y in diagram space.</param>
+    /// <param name="sourceSide">Geometric side of the source pin.</param>
+    /// <param name="x2">Target pin X in diagram space.</param>
+    /// <param name="y2">Target pin Y in diagram space.</param>
+    /// <param name="targetSide">Geometric side of the target pin.</param>
+    /// <param name="routeIndex">Index used to stagger overlapping Bezier lanes.</param>
+    /// <param name="obstacles">Box rectangles to avoid; treated as empty when <see langword="null"/>.</param>
+    /// <param name="reservedVerticalLanes">X coordinates already claimed by prior routes.</param>
+    /// <param name="reservedHorizontalLanes">Y coordinates already claimed by prior routes.</param>
+    /// <returns>An ordered list of polyline points from source to target.</returns>
     public static IReadOnlyList<Point> GetPathPoints(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -231,6 +395,11 @@ internal static class ConnectionRenderHelper
             reservedVerticalLanes, reservedHorizontalLanes);
     }
 
+    /// <summary>
+    /// Builds axis-aligned obstacle rectangles from all state boxes in the view model.
+    /// </summary>
+    /// <param name="vm">The main view model containing box layout information.</param>
+    /// <returns>One <see cref="BoxRect"/> per box, including expanded height for steps.</returns>
     public static IReadOnlyList<BoxRect> BuildObstacles(MainViewModel vm)
     {
         var obstacles = new List<BoxRect>(vm.Boxes.Count);
@@ -244,6 +413,12 @@ internal static class ConnectionRenderHelper
         return obstacles;
     }
 
+    /// <summary>
+    /// Returns +1 or -1 for the outward stub direction from a pin based on its geometric side.
+    /// This describes exit direction from the box edge, not source-versus-target connection flow.
+    /// </summary>
+    /// <param name="side">Geometric pin side.</param>
+    /// <returns>+1 for <see cref="PinSide.Right"/>, <see cref="PinSide.Bottom"/>, and <see cref="PinSide.Error"/>; -1 for <see cref="PinSide.Left"/> and <see cref="PinSide.Top"/>; 0 otherwise.</returns>
     private static int SignOf(PinSide side) => side switch
     {
         PinSide.Right or PinSide.Bottom or PinSide.Error => +1,
@@ -251,6 +426,10 @@ internal static class ConnectionRenderHelper
         _ => 0
     };
 
+    /// <summary>
+    /// Routes a connection between two horizontally oriented pins, preferring a Bezier when aligned
+    /// and falling back to <see cref="OrthogonalHorizontal"/> otherwise.
+    /// </summary>
     private static List<Point> RouteHorizontal(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -273,6 +452,9 @@ internal static class ConnectionRenderHelper
             reservedVerticalLanes, reservedHorizontalLanes);
     }
 
+    /// <summary>
+    /// Returns whether horizontally oriented pins face backward relative to each other beyond <see cref="BackwardThreshold"/>.
+    /// </summary>
     private static bool NeedsOrthogonalHorizontal(double x1, PinSide sourceSide, double x2, PinSide targetSide)
     {
         var sourceForward = sourceSide is PinSide.Right or PinSide.Error;
@@ -284,6 +466,9 @@ internal static class ConnectionRenderHelper
         return false;
     }
 
+    /// <summary>
+    /// Returns whether stub exit points along X leave enough gap for a horizontal Bezier between the pins.
+    /// </summary>
     private static bool HasBezierRoomHorizontal(double x1, PinSide sourceSide, double x2, PinSide targetSide)
     {
         const double BezierMinGap = 16;
@@ -292,6 +477,10 @@ internal static class ConnectionRenderHelper
         return sourceExit <= targetEntry;
     }
 
+    /// <summary>
+    /// Routes a connection between two vertically oriented pins, preferring a Bezier when aligned
+    /// and falling back to <see cref="OrthogonalVertical"/> otherwise.
+    /// </summary>
     private static List<Point> RouteVertical(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -312,6 +501,9 @@ internal static class ConnectionRenderHelper
             reservedVerticalLanes, reservedHorizontalLanes);
     }
 
+    /// <summary>
+    /// Returns whether vertically oriented pins face backward relative to each other beyond <see cref="BackwardThreshold"/>.
+    /// </summary>
     private static bool NeedsOrthogonalVertical(double y1, PinSide sourceSide, double y2, PinSide targetSide)
     {
         var sourceForward = sourceSide == PinSide.Bottom;
@@ -323,6 +515,9 @@ internal static class ConnectionRenderHelper
         return false;
     }
 
+    /// <summary>
+    /// Returns whether stub exit points along Y leave enough gap for a vertical Bezier between the pins.
+    /// </summary>
     private static bool HasBezierRoomVertical(double y1, PinSide sourceSide, double y2, PinSide targetSide)
     {
         const double BezierMinGap = 16;
@@ -331,6 +526,10 @@ internal static class ConnectionRenderHelper
         return sourceExit <= targetEntry;
     }
 
+    /// <summary>
+    /// Builds an orthogonal polyline for two horizontally oriented pins, handling same-facing U-routes,
+    /// opposite-facing two-corner paths, and bridge segments when stubs cross.
+    /// </summary>
     private static List<Point> OrthogonalHorizontal(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -420,6 +619,10 @@ internal static class ConnectionRenderHelper
         ];
     }
 
+    /// <summary>
+    /// Builds an orthogonal polyline for two vertically oriented pins, mirroring
+    /// <see cref="OrthogonalHorizontal"/> in the vertical axis.
+    /// </summary>
     private static List<Point> OrthogonalVertical(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -501,6 +704,9 @@ internal static class ConnectionRenderHelper
         ];
     }
 
+    /// <summary>
+    /// Routes a mixed-orientation connection (one horizontal pin, one vertical pin) with a single elbow turn.
+    /// </summary>
     private static List<Point> RouteElbow(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -555,6 +761,10 @@ internal static class ConnectionRenderHelper
         return preferred;
     }
 
+    /// <summary>
+    /// Finds a clear horizontal bridge Y between two vertical columns, preferring an in-band channel
+    /// and otherwise wrapping above or below the pin span.
+    /// </summary>
     private static double ClearBridgeY(
         double y1, double y2, double leftX, double rightX,
         IReadOnlyList<BoxRect> obstacles,
@@ -597,6 +807,10 @@ internal static class ConnectionRenderHelper
         return Math.Abs(above - mid) <= Math.Abs(below - mid) ? above : below;
     }
 
+    /// <summary>
+    /// Finds a clear vertical bridge X between two horizontal rows, preferring an in-band channel
+    /// and otherwise wrapping left or right of the pin span.
+    /// </summary>
     private static double ClearBridgeX(
         double x1, double x2, double topY, double bottomY,
         IReadOnlyList<BoxRect> obstacles,
@@ -639,6 +853,10 @@ internal static class ConnectionRenderHelper
         return Math.Abs(left - mid) <= Math.Abs(right - mid) ? left : right;
     }
 
+    /// <summary>
+    /// Records vertical and horizontal lane coordinates from long axis-aligned segments of a routed path
+    /// so subsequent connections can nudge away from them.
+    /// </summary>
     private static void AddLanesFromPath(
         IReadOnlyList<Point> points, List<double> reservedVertical, List<double> reservedHorizontal)
     {
@@ -655,6 +873,9 @@ internal static class ConnectionRenderHelper
         }
     }
 
+    /// <summary>
+    /// Returns whether a coordinate is within <see cref="LaneSpacing"/> of any reserved lane value.
+    /// </summary>
     private static bool IsLaneReserved(double value, IReadOnlyList<double> reserved)
     {
         foreach (var lane in reserved)
@@ -670,6 +891,13 @@ internal static class ConnectionRenderHelper
     /// Finds a clear value in [lo, hi] closest to <paramref name="target"/>, preferring
     /// geometric gaps between obstacles over wrapping outside the span.
     /// </summary>
+    /// <param name="lo">Lower bound of the search interval.</param>
+    /// <param name="hi">Upper bound of the search interval.</param>
+    /// <param name="target">Preferred coordinate within the interval.</param>
+    /// <param name="reserved">Lane coordinates that must not be reused.</param>
+    /// <param name="isClear">Predicate that returns <see langword="true"/> when a candidate coordinate is unobstructed.</param>
+    /// <param name="channel">When this method returns <see langword="true"/>, receives the chosen coordinate.</param>
+    /// <returns><see langword="true"/> when a suitable channel was found inside the interval.</returns>
     private static bool TryFindChannel(
         double lo, double hi, double target,
         IReadOnlyList<double> reserved,
@@ -721,6 +949,9 @@ internal static class ConnectionRenderHelper
         }
     }
 
+    /// <summary>
+    /// Searches along X for a vertical lane that is clear of obstacles and reserved wires.
+    /// </summary>
     private static double PickVerticalLane(
         double preferredX, double y1, double y2,
         IReadOnlyList<BoxRect> obstacles,
@@ -753,6 +984,9 @@ internal static class ConnectionRenderHelper
         return preferredX;
     }
 
+    /// <summary>
+    /// Searches along Y for a horizontal lane that is clear of obstacles and reserved wires.
+    /// </summary>
     private static double PickHorizontalLane(
         double preferredY, double x1, double x2,
         IReadOnlyList<BoxRect> obstacles,
@@ -785,6 +1019,9 @@ internal static class ConnectionRenderHelper
         return preferredY;
     }
 
+    /// <summary>
+    /// Returns whether a vertical segment at <paramref name="x"/> intersects any obstacle rectangle, expanded by <paramref name="clearance"/>.
+    /// </summary>
     private static bool VerticalSegmentBlocked(
         double x, double y1, double y2, IReadOnlyList<BoxRect> obstacles, double clearance = BoxClearance)
     {
@@ -802,6 +1039,9 @@ internal static class ConnectionRenderHelper
         return false;
     }
 
+    /// <summary>
+    /// Returns whether a horizontal segment at <paramref name="y"/> intersects any obstacle rectangle, expanded by <paramref name="clearance"/>.
+    /// </summary>
     private static bool HorizontalSegmentBlocked(
         double y, double x1, double x2, IReadOnlyList<BoxRect> obstacles, double clearance = BoxClearance)
     {
@@ -819,6 +1059,9 @@ internal static class ConnectionRenderHelper
         return false;
     }
 
+    /// <summary>
+    /// Builds a sampled cubic Bezier polyline for two horizontally oriented, roughly aligned pins.
+    /// </summary>
     private static List<Point> HorizontalBezier(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -846,6 +1089,9 @@ internal static class ConnectionRenderHelper
         return SampleCubicBezier(p0, p1, p2, p3);
     }
 
+    /// <summary>
+    /// Builds a sampled cubic Bezier polyline for two vertically oriented, roughly aligned pins.
+    /// </summary>
     private static List<Point> VerticalBezier(
         double x1, double y1, PinSide sourceSide,
         double x2, double y2, PinSide targetSide,
@@ -873,6 +1119,9 @@ internal static class ConnectionRenderHelper
         return SampleCubicBezier(p0, p1, p2, p3);
     }
 
+    /// <summary>
+    /// Approximates a cubic Bezier curve as a polyline with <see cref="BezierSampleCount"/> segments.
+    /// </summary>
     private static List<Point> SampleCubicBezier(Point p0, Point p1, Point p2, Point p3)
     {
         var points = new List<Point> { p0 };
@@ -888,6 +1137,9 @@ internal static class ConnectionRenderHelper
         return points;
     }
 
+    /// <summary>
+    /// Creates an open <see cref="StreamGeometry"/> polyline through the given points.
+    /// </summary>
     private static StreamGeometry CreatePolylineGeometry(IReadOnlyList<Point> points)
     {
         var geometry = new StreamGeometry();
@@ -902,6 +1154,9 @@ internal static class ConnectionRenderHelper
         return geometry;
     }
 
+    /// <summary>
+    /// Interpolates position and segment tangent at normalized arc length <paramref name="t"/> along a polyline.
+    /// </summary>
     private static RoutePoint GetPointAlongPolyline(IReadOnlyList<Point> points, double t)
     {
         if (points.Count < 2)
@@ -938,6 +1193,9 @@ internal static class ConnectionRenderHelper
         return new RoutePoint(points[^1].X, points[^1].Y, 0);
     }
 
+    /// <summary>
+    /// Returns the shortest distance from point (<paramref name="px"/>, <paramref name="py"/>) to line segment <paramref name="a"/>–<paramref name="b"/>.
+    /// </summary>
     private static double DistanceToSegment(double px, double py, Point a, Point b)
     {
         var dx = b.X - a.X;
@@ -958,6 +1216,9 @@ internal static class ConnectionRenderHelper
         return Math.Sqrt(ox * ox + oy * oy);
     }
 
+    /// <summary>
+    /// Returns a small perpendicular offset used to stagger overlapping forward Bezier lanes by <paramref name="routeIndex"/>.
+    /// </summary>
     private static double GetForwardLaneOffset(int routeIndex)
     {
         if (routeIndex == 0)

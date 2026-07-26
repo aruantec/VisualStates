@@ -3,13 +3,26 @@ using VisualStates.Core.Serialization;
 
 namespace VisualStates.Services;
 
+/// <summary>
+/// Default <see cref="IProjectService"/> that keeps the in-memory project,
+/// file path, and dirty flag in sync with the disk via
+/// <see cref="StateProjectSerializer"/>.
+/// </summary>
 public sealed class ProjectService : IProjectService
 {
+    /// <inheritdoc />
     public StateProject Current { get; private set; } = CreateDefaultProject();
+
+    /// <inheritdoc />
     public string? CurrentFilePath { get; private set; }
+
+    /// <inheritdoc />
     public bool IsDirty { get; private set; }
+
+    /// <inheritdoc />
     public event EventHandler? ProjectChanged;
 
+    /// <inheritdoc />
     public void NewProject()
     {
         Current = CreateDefaultProject();
@@ -18,6 +31,7 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <inheritdoc />
     public async Task OpenAsync(string path, CancellationToken cancellationToken = default)
     {
         var project = await StateProjectSerializer.LoadAsync(path, cancellationToken);
@@ -27,6 +41,7 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <inheritdoc />
     public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(CurrentFilePath))
@@ -37,6 +52,7 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <inheritdoc />
     public async Task SaveAsAsync(string path, CancellationToken cancellationToken = default)
     {
         CurrentFilePath = path;
@@ -45,6 +61,7 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <inheritdoc />
     public void MarkDirty()
     {
         if (IsDirty)
@@ -54,6 +71,7 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <inheritdoc />
     public void ReplaceProject(StateProject project, string? filePath = null)
     {
         Current = project;

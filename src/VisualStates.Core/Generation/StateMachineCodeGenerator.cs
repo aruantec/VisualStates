@@ -4,8 +4,19 @@ using VisualStates.Core.Models;
 
 namespace VisualStates.Core.Generation;
 
+/// <summary>
+/// Emits a C# class implementing the generated state-machine contract
+/// (<c>IGeneratedStateMachine</c> in VisualStates.Runtime) from a
+/// <see cref="StateProject"/> graph, including variables, ordered step methods,
+/// and error-handler try/catch wrappers.
+/// </summary>
 public sealed class StateMachineCodeGenerator
 {
+    /// <summary>
+    /// Generates the full C# source for the project's state machine class.
+    /// </summary>
+    /// <param name="project">Project whose graph and settings drive generation.</param>
+    /// <returns>Complete C# source text.</returns>
     public string Generate(StateProject project)
     {
         var methodNames = BuildMethodNames(project);
@@ -342,10 +353,25 @@ public sealed class StateMachineCodeGenerator
     }
 }
 
+/// <summary>
+/// A single executable node in the generated order: a box plus an optional step id
+/// (null means the empty box itself).
+/// </summary>
+/// <param name="BoxId">Owning box id.</param>
+/// <param name="StepId">Step id within the box, or null for an empty box.</param>
 internal readonly record struct ExecutionNode(string BoxId, string? StepId);
 
+/// <summary>
+/// Builds a topological execution order over project steps, chaining zone children
+/// in visual order and skipping error-branch connections.
+/// </summary>
 internal static class ExecutionOrderBuilder
 {
+    /// <summary>
+    /// Computes a stable execution order for all steps (and empty boxes) in
+    /// <paramref name="project"/>.
+    /// </summary>
+    /// <param name="project">Project to order.</param>
     public static IReadOnlyList<ExecutionNode> Build(StateProject project)
     {
         var nodes = new List<ExecutionNode>();
@@ -476,6 +502,12 @@ internal static class ExecutionOrderBuilder
         return ToNode(project, connection.TargetBoxId, connection.TargetStepId);
     }
 
+    /// <summary>
+    /// Resolves the execution node a connection targets, expanding zone endpoints
+    /// to their enter box/step.
+    /// </summary>
+    /// <param name="project">Project that owns the connection.</param>
+    /// <param name="connection">Connection whose target to resolve.</param>
     public static ExecutionNode? ResolveTargetNode(StateProject project, StateConnection connection) =>
         ResolveConnectionTarget(project, connection);
 
