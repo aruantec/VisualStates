@@ -32,9 +32,9 @@ A visual state machine editor written in C# and Avalonia, inspired by Unreal Eng
 dotnet run --project src/VisualStates/VisualStates.csproj
 ```
 
-## Releases
+## Releases [GitHub Release](https://github.com/aruantec/VisualStates/releases)
 
-GitHub Actions builds self-contained packages for Windows, macOS, and Linux (no AOT). Push a `v*` tag (for example `v0.1.0`) to create a [GitHub Release](https://github.com/aruantec/VisualStates/releases) with:
+GitHub Actions builds self-contained packages for Windows, macOS, and Linux
 
 - `VisualStates-windows-x64.zip`
 - `VisualStates-macos-osx-arm64.zip`
