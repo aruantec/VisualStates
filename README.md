@@ -1,6 +1,6 @@
 # VisualStates
 
-A visual state machine editor for Avalonia, inspired by Unreal Engine Blueprints.
+A visual state machine editor written in C# and Avalonia, inspired by Unreal Engine Blueprints.
 
 ## Features
 
