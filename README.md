@@ -32,6 +32,18 @@ A visual state machine editor written in C# and Avalonia, inspired by Unreal Eng
 dotnet run --project src/VisualStates/VisualStates.csproj
 ```
 
+## Releases
+
+GitHub Actions builds self-contained packages for Windows, macOS, and Linux (no AOT). Push a `v*` tag (for example `v0.1.0`) to create a [GitHub Release](https://github.com/aruantec/VisualStates/releases) with:
+
+- `VisualStates-windows-x64.zip`
+- `VisualStates-macos-osx-arm64.zip`
+- `VisualStates-macos-osx-Intel-x64.zip`
+- `VisualStates-Linux-x86_64.AppImage`
+- `VisualStates-aarch64.AppImage`
+
+See [BUILDING.md](BUILDING.md) for local publish and packaging details.
+
 ## Usage
 
 1. **File → New** creates a project with a default **Main** state box (already marked as the main entry point). You can rename it; it stays the entry until you assign another box.

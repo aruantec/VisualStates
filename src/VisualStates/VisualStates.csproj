@@ -6,6 +6,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <AssemblyName>VisualStates</AssemblyName>
+    <RootNamespace>VisualStates</RootNamespace>
+    <ApplicationIcon Condition="Exists('Assets/VisualStates.ico')">Assets/VisualStates.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,5 +34,9 @@
   <ItemGroup>
     <ProjectReference Include="..\VisualStates.Core\VisualStates.Core.csproj" />
     <ProjectReference Include="..\VisualStates.Runtime\VisualStates.Runtime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Assets\VisualStates.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

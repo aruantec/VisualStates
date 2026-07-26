@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=VisualStates
+Comment=Visual state machine editor
+Exec=__EXEC__
+Icon=__ICON__
+Terminal=false
+Categories=Development;IDE;
+StartupNotify=true
+StartupWMClass=VisualStates

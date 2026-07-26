@@ -1,0 +1,296 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional version tag to create (e.g. v1.2.3)'
+        required: false
+      prerelease:
+        description: 'If true, create a prerelease tag (e.g. v1.2.3-rc.1)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  test:
+    name: Run unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore VisualStates.slnx
+
+      - name: Build
+        run: dotnet build VisualStates.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/VisualStates.Tests/VisualStates.Tests.csproj -c Release --no-build --no-restore
+
+  package:
+    name: ${{ matrix.name }}
+    needs: test
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runs_on: windows-latest
+            runtime: win-x64
+            publish_dir_name: win-x64
+            package_type: windows
+            artifact_name: release-VisualStates-windows-x64
+            asset_name: VisualStates-windows-x64.zip
+          - name: macOS Apple Silicon
+            runs_on: macos-latest
+            runtime: osx-arm64
+            publish_dir_name: osx-arm64
+            package_type: macos
+            artifact_name: release-VisualStates-macos-osx-arm64
+            asset_name: VisualStates-macos-osx-arm64.zip
+          - name: macOS Intel
+            runs_on: macos-latest
+            runtime: osx-x64
+            publish_dir_name: osx-x64
+            package_type: macos
+            artifact_name: release-VisualStates-macos-osx-Intel-x64
+            asset_name: VisualStates-macos-osx-Intel-x64.zip
+          - name: Linux x86_64 AppImage
+            runs_on: ubuntu-latest
+            runtime: linux-x64
+            publish_dir_name: linux-x64
+            package_type: appimage
+            artifact_name: release-VisualStates-Linux-x86_64
+            asset_name: VisualStates-Linux-x86_64.AppImage
+            appimage_arch: x86_64
+          - name: Linux aarch64 AppImage
+            runs_on: ubuntu-24.04-arm
+            runtime: linux-arm64
+            publish_dir_name: linux-arm64
+            package_type: appimage
+            artifact_name: release-VisualStates-aarch64
+            asset_name: VisualStates-aarch64.AppImage
+            appimage_arch: aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve project version
+        id: version
+        shell: bash
+        run: |
+          RAW_VERSION="${{ github.event.inputs.version || github.ref_name || '0.0.0-local' }}"
+          PROJECT_VERSION="${RAW_VERSION#v}"
+          PROJECT_VERSION="${PROJECT_VERSION#V}"
+
+          if [[ "$PROJECT_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)([A-Za-z][0-9A-Za-z.-]*)$ ]]; then
+            PROJECT_VERSION="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
+          fi
+
+          if [[ ! "$PROJECT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid project version after normalization: '$PROJECT_VERSION'" >&2
+            exit 1
+          fi
+
+          echo "raw=$RAW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "project=$PROJECT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure scripts are executable
+        if: runner.os != 'Windows'
+        run: chmod +x ./scripts/publish-macos.sh ./scripts/package-appimage.sh
+
+      - name: Restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if dotnet restore src/VisualStates/VisualStates.csproj -r ${{ matrix.runtime }}; then
+              exit 0
+            fi
+            echo "Restore attempt ${attempt} failed; retrying in 10s..." >&2
+            sleep 10
+          done
+          exit 1
+
+      - name: Publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/VisualStates/VisualStates.csproj \
+            -c Release \
+            -r "${{ matrix.runtime }}" \
+            -o "output/publish/Release/${{ matrix.publish_dir_name }}" \
+            -p:Version=${{ steps.version.outputs.project }} \
+            --self-contained true \
+            --no-restore
+
+      - name: Package Windows archive
+        if: matrix.package_type == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Compress-Archive -Path "output/publish/Release/${{ matrix.publish_dir_name }}/*" -DestinationPath "artifacts/${{ matrix.asset_name }}"
+
+      - name: Bundle macOS app
+        if: matrix.package_type == 'macos'
+        env:
+          APP_VERSION: ${{ steps.version.outputs.project }}
+        run: ./scripts/publish-macos.sh "output/publish/Release/${{ matrix.publish_dir_name }}"
+
+      - name: Package macOS archive
+        if: matrix.package_type == 'macos'
+        run: |
+          mkdir -p artifacts
+          ditto -c -k --sequesterRsrc --keepParent \
+            "output/publish/Release/${{ matrix.publish_dir_name }}/VisualStates.app" \
+            "artifacts/${{ matrix.asset_name }}"
+
+      - name: Verify Linux publish payload
+        if: matrix.package_type == 'appimage'
+        run: |
+          set -euo pipefail
+          PUB="output/publish/Release/${{ matrix.publish_dir_name }}"
+          test -f "$PUB/VisualStates"
+          chmod +x "$PUB/VisualStates"
+
+      - name: Download appimagetool
+        if: matrix.package_type == 'appimage'
+        run: |
+          mkdir -p tools artifacts
+          curl -fsSL -o "tools/appimagetool.AppImage" \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage_arch }}.AppImage"
+          chmod +x "tools/appimagetool.AppImage"
+
+      - name: Package AppImage
+        if: matrix.package_type == 'appimage'
+        env:
+          APPIMAGETOOL: ${{ github.workspace }}/tools/appimagetool.AppImage
+          APP_VERSION: ${{ steps.version.outputs.project }}
+        run: |
+          ./scripts/package-appimage.sh \
+            "output/publish/Release/${{ matrix.publish_dir_name }}" \
+            "artifacts" \
+            "${{ matrix.appimage_arch }}" \
+            "${{ matrix.asset_name }}"
+
+      - name: Upload packaged asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifacts/${{ matrix.asset_name }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: package
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: List downloaded assets
+        run: |
+          echo "--- release-assets tree ---"
+          find release-assets -type f -maxdepth 3 -print
+
+      - name: Create GitHub release + upload assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ github.event.inputs.version || '' }}
+          INPUT_PRERELEASE: ${{ github.event.inputs.prerelease || 'false' }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t files < <(find release-assets -type f \( -iname '*.zip' -o -iname '*.AppImage' \) -print)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No release assets found in release-assets/"
+            ls -la release-assets || true
+            exit 1
+          fi
+
+          echo "Found ${#files[@]} release assets to upload:"
+          for f in "${files[@]}"; do
+            echo " - $f"
+          done
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          else
+            if [[ -n "${INPUT_VERSION:-}" ]]; then
+              RELEASE_TAG="${INPUT_VERSION}"
+            else
+              stable_latest=$(git tag --list 'v*' \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                | sort -Vr \
+                | head -n1 || true)
+              if [[ -z "${stable_latest}" ]]; then
+                stable_latest='v0.0.0'
+              fi
+
+              base="${stable_latest#v}"
+              IFS='.' read -r major minor patch <<< "${base}"
+              next_patch=$((patch + 1))
+              next_base="${major}.${minor}.${next_patch}"
+
+              if [[ "${INPUT_PRERELEASE:-false}" == "true" ]]; then
+                max_rc=0
+                for tag in $(git tag --list "v${next_base}-rc.*"); do
+                  rc="${tag##*-rc.}"
+                  if [[ "${rc}" =~ ^[0-9]+$ ]] && (( rc > max_rc )); then
+                    max_rc=$rc
+                  fi
+                done
+                RELEASE_TAG="v${next_base}-rc.$((max_rc + 1))"
+              else
+                RELEASE_TAG="v${next_base}"
+              fi
+            fi
+          fi
+
+          echo "Using release tag: ${RELEASE_TAG}"
+
+          if ! gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            prerelease_flag=""
+            if [[ "${RELEASE_TAG}" == *-* ]]; then
+              prerelease_flag="--prerelease"
+            fi
+            gh release create "${RELEASE_TAG}" --title "${RELEASE_TAG}" --generate-notes ${prerelease_flag}
+          fi
+
+          for f in "${files[@]}"; do
+            echo "Uploading $f"
+            gh release upload "${RELEASE_TAG}" "$f" --clobber
+          done

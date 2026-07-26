@@ -5,3 +5,7 @@ obj/
 *.user
 *.suo
 *.state.user
+output/
+artifacts/
+tools/
+*.AppImage
