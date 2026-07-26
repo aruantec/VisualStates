@@ -12,6 +12,8 @@
         x:DataType="vm:MainViewModel"
         Width="1400"
         Height="900"
+        WindowState="Maximized"
+        WindowStartupLocation="CenterScreen"
         Background="#FF1E1E1E">
 
   <DockPanel>
