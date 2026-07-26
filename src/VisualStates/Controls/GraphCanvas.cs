@@ -75,8 +75,11 @@ public class GraphCanvas : Control
         ClipToBoundsProperty.OverrideDefaultValue<GraphCanvas>(true);
     }
 
-    /// <inheritdoc />
-    /// <remarks>Subscribes to or unsubscribes from the bound <see cref="ViewModel"/> when it changes.</remarks>
+    /// <summary>
+    /// Subscribes to or unsubscribes from the bound <see cref="ViewModel"/> when it changes
+    /// and invalidates the visual.
+    /// </summary>
+    /// <param name="change">Property change details.</param>
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -91,8 +94,10 @@ public class GraphCanvas : Control
         InvalidateVisual();
     }
 
-    /// <inheritdoc />
-    /// <remarks>Hooks the <see cref="ViewModel"/> when the control is attached if not already hooked.</remarks>
+    /// <summary>
+    /// Hooks the <see cref="ViewModel"/> when the control is attached if not already hooked.
+    /// </summary>
+    /// <param name="e">Attachment event args.</param>
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -103,8 +108,10 @@ public class GraphCanvas : Control
         }
     }
 
-    /// <inheritdoc />
-    /// <remarks>Stops zoom animation and unhooks the view model when detached.</remarks>
+    /// <summary>
+    /// Stops zoom animation and unhooks the view model when the control is detached.
+    /// </summary>
+    /// <param name="e">Detachment event args.</param>
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         StopZoomAnimation();
@@ -285,8 +292,10 @@ public class GraphCanvas : Control
         set => SetValue(ViewModelProperty, value);
     }
 
-    /// <inheritdoc />
-    /// <remarks>Applies smooth zoom centered on the wheel position via <see cref="ApplyZoomAt"/>.</remarks>
+    /// <summary>
+    /// Applies smooth zoom centered on the wheel position via <see cref="ApplyZoomAt"/>.
+    /// </summary>
+    /// <param name="e">Pointer wheel event args.</param>
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
@@ -423,17 +432,14 @@ public class GraphCanvas : Control
     /// <param name="e">The pointer event arguments.</param>
     internal void HandlePointerReleased(PointerReleasedEventArgs e) => OnPointerReleased(e);
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// <para>Handles middle-button or Shift+left-button pan, pin hits, box/zone selection and drag,
-    /// and background pan with click-to-select.</para>
-    /// <para>
-    /// Connection drag: pins are direction-agnostic — any pin under the cursor can start or complete a drag.
+    /// <summary>
+    /// Handles middle-button or Shift+left-button pan, pin hits, box/zone selection and drag,
+    /// and background pan with click-to-select.
+    /// Pins are direction-agnostic: any pin can start or complete a connection drag.
     /// The pin where the drag starts is the source; the pin where the user drops is the target.
-    /// If <see cref="MainViewModel.IsConnecting"/> is already true, pressing a pin completes the drag
-    /// to that pin (box/step or zone). Otherwise, pressing a pin starts a new connection drag from it.
-    /// </para>
-    /// </remarks>
+    /// If a connection drag is already active, pressing a pin completes it; otherwise it starts one.
+    /// </summary>
+    /// <param name="e">Pointer pressed event args.</param>
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
@@ -537,8 +543,11 @@ public class GraphCanvas : Control
         e.Handled = true;
     }
 
-    /// <inheritdoc />
-    /// <remarks>Updates pan, connection drag hover, box/zone drag, resize, and hover cursors.</remarks>
+    /// <summary>
+    /// Updates pan, connection-drag hover, box/zone drag, zone resize, and hover cursors
+    /// while the pointer moves over the canvas.
+    /// </summary>
+    /// <param name="e">Pointer moved event args.</param>
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
@@ -626,8 +635,10 @@ public class GraphCanvas : Control
         UpdateErrorPinTooltip(ScreenToGraph(e.GetCurrentPoint(this).Position));
     }
 
-    /// <inheritdoc />
-    /// <remarks>Resets the cursor and clears the error-pin tooltip when the pointer leaves the control.</remarks>
+    /// <summary>
+    /// Resets the cursor and clears the error-pin tooltip when the pointer leaves the control.
+    /// </summary>
+    /// <param name="e">Pointer exited event args.</param>
     protected override void OnPointerExited(PointerEventArgs e)
     {
         base.OnPointerExited(e);
@@ -708,8 +719,11 @@ public class GraphCanvas : Control
         box.Y = Math.Clamp(box.Y, minY, Math.Max(minY, maxY));
     }
 
-    /// <inheritdoc />
-    /// <remarks>Completes or cancels connection drags, finalizes box/zone moves, and ends view pan.</remarks>
+    /// <summary>
+    /// Completes or cancels an in-flight connection drag, finalizes box/zone moves and resizes,
+    /// and ends view pan (including click-to-select on the background).
+    /// </summary>
+    /// <param name="e">Pointer released event args.</param>
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
@@ -773,8 +787,10 @@ public class GraphCanvas : Control
         ResetCursor();
     }
 
-    /// <inheritdoc />
-    /// <remarks>Handles Delete (remove selection) and Escape (cancel connection drag).</remarks>
+    /// <summary>
+    /// Handles Delete (remove selection) and Escape (cancel connection drag).
+    /// </summary>
+    /// <param name="e">Key event args.</param>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -798,11 +814,11 @@ public class GraphCanvas : Control
         }
     }
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// Draws the graph in order: background grid, zones (with pins), then state boxes (with steps and pins).
-    /// Applies the current pan and zoom transform from <see cref="ViewModel"/>.
-    /// </remarks>
+    /// <summary>
+    /// Draws the graph in order: background grid, zones (with pins), then state boxes
+    /// (with steps and pins), under the current pan and zoom from <see cref="ViewModel"/>.
+    /// </summary>
+    /// <param name="context">Drawing context for this frame.</param>
     public override void Render(DrawingContext context)
     {
         base.Render(context);

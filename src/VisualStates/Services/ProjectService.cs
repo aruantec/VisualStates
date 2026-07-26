@@ -10,19 +10,22 @@ namespace VisualStates.Services;
 /// </summary>
 public sealed class ProjectService : IProjectService
 {
-    /// <inheritdoc />
+    /// <summary>The in-memory project currently being edited.</summary>
     public StateProject Current { get; private set; } = CreateDefaultProject();
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Absolute path of the last opened/saved <c>.state</c> file, or
+    /// <see langword="null"/> for a new project.
+    /// </summary>
     public string? CurrentFilePath { get; private set; }
 
-    /// <inheritdoc />
+    /// <summary>True when the project has unsaved changes.</summary>
     public bool IsDirty { get; private set; }
 
-    /// <inheritdoc />
+    /// <summary>Raised when the current project, path, or dirty flag changes.</summary>
     public event EventHandler? ProjectChanged;
 
-    /// <inheritdoc />
+    /// <summary>Replaces the current project with a fresh default document.</summary>
     public void NewProject()
     {
         Current = CreateDefaultProject();
@@ -31,7 +34,11 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Loads a project from <paramref name="path"/> and clears the dirty flag.
+    /// </summary>
+    /// <param name="path">Path to a <c>.state</c> file.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task OpenAsync(string path, CancellationToken cancellationToken = default)
     {
         var project = await StateProjectSerializer.LoadAsync(path, cancellationToken);
@@ -41,7 +48,11 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Saves the current project to <see cref="CurrentFilePath"/>.
+    /// Throws when no path is set — use <see cref="SaveAsAsync"/> first.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(CurrentFilePath))
@@ -52,7 +63,12 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Saves the current project to <paramref name="path"/> and updates
+    /// <see cref="CurrentFilePath"/>.
+    /// </summary>
+    /// <param name="path">Destination file path.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task SaveAsAsync(string path, CancellationToken cancellationToken = default)
     {
         CurrentFilePath = path;
@@ -61,7 +77,7 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <inheritdoc />
+    /// <summary>Marks the project dirty if it is not already.</summary>
     public void MarkDirty()
     {
         if (IsDirty)
@@ -71,7 +87,12 @@ public sealed class ProjectService : IProjectService
         ProjectChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Replaces the in-memory project (e.g. after undo/redo of structural edits)
+    /// and clears the dirty flag.
+    /// </summary>
+    /// <param name="project">New current project.</param>
+    /// <param name="filePath">Optional associated file path.</param>
     public void ReplaceProject(StateProject project, string? filePath = null)
     {
         Current = project;

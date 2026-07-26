@@ -57,7 +57,11 @@ public class CompositionConnectionLayer : Control
         set => SetValue(ViewModelProperty, value);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Re-hooks the bound <see cref="ViewModel"/> when <see cref="ViewModelProperty"/> changes
+    /// and invalidates the visual so wires redraw.
+    /// </summary>
+    /// <param name="change">Property change details.</param>
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -72,7 +76,11 @@ public class CompositionConnectionLayer : Control
         InvalidateVisual();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Hooks the current <see cref="ViewModel"/> when the control enters the visual tree
+    /// if subscriptions were not already established.
+    /// </summary>
+    /// <param name="e">Attachment event args.</param>
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -83,7 +91,11 @@ public class CompositionConnectionLayer : Control
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Unhooks the view model and clears the subscription handle when the control
+    /// leaves the visual tree.
+    /// </summary>
+    /// <param name="e">Detachment event args.</param>
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         UnhookViewModel(_hookedViewModel);
@@ -199,7 +211,11 @@ public class CompositionConnectionLayer : Control
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Draws all routed connections (with animated flow) and, when a connection
+    /// drag is active, the rubber-band preview wire.
+    /// </summary>
+    /// <param name="context">Drawing context for this frame.</param>
     public override void Render(DrawingContext context)
     {
         base.Render(context);

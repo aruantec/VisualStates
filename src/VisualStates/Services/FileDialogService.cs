@@ -21,7 +21,14 @@ public sealed class FileDialogService : IFileDialogService
         _windowProvider = windowProvider;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Shows an open-file dialog via Avalonia's storage provider and returns the
+    /// selected path, or <see langword="null"/> when cancelled or unavailable.
+    /// </summary>
+    /// <param name="title">Dialog title.</param>
+    /// <param name="filterName">Human-readable filter label.</param>
+    /// <param name="extension">File extension without the leading dot.</param>
+    /// <returns>Local file path, or <see langword="null"/>.</returns>
     public async Task<string?> PickOpenFileAsync(string title, string filterName, string extension)
     {
         var window = _windowProvider();
@@ -44,7 +51,16 @@ public sealed class FileDialogService : IFileDialogService
         return files.Count > 0 ? files[0].Path.LocalPath : null;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Shows a save-file dialog via Avalonia's storage provider and returns the
+    /// chosen path (appending <paramref name="extension"/> when missing), or
+    /// <see langword="null"/> when cancelled or unavailable.
+    /// </summary>
+    /// <param name="title">Dialog title.</param>
+    /// <param name="filterName">Human-readable filter label.</param>
+    /// <param name="extension">File extension without the leading dot.</param>
+    /// <param name="defaultFileName">Optional suggested file name.</param>
+    /// <returns>Local file path, or <see langword="null"/>.</returns>
     public async Task<string?> PickSaveFileAsync(string title, string filterName, string extension, string? defaultFileName = null)
     {
         var window = _windowProvider();

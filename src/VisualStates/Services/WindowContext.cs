@@ -17,6 +17,6 @@ public interface IWindowContext
 /// </summary>
 public sealed class WindowContext : IWindowContext
 {
-    /// <inheritdoc />
+    /// <summary>The main application window, set once the window is constructed.</summary>
     public Window? MainWindow { get; set; }
 }

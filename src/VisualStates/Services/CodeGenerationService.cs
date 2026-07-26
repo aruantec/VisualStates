@@ -11,6 +11,10 @@ public sealed class CodeGenerationService : ICodeGenerationService
 {
     private readonly StateMachineCodeGenerator _generator = new();
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Emits the full generated state-machine class for <paramref name="project"/>.
+    /// </summary>
+    /// <param name="project">Project to generate from.</param>
+    /// <returns>C# source text.</returns>
     public string Generate(StateProject project) => _generator.Generate(project);
 }

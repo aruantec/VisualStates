@@ -101,12 +101,14 @@ public sealed class ActionCommand : IUndoableCommand
         _undo = undo;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Short human-readable description shown in status / history UIs.
+    /// </summary>
     public string Description { get; }
 
-    /// <inheritdoc />
+    /// <summary>Applies the change by invoking the execute action.</summary>
     public void Execute() => _execute();
 
-    /// <inheritdoc />
+    /// <summary>Reverts the change by invoking the undo action.</summary>
     public void Undo() => _undo();
 }
