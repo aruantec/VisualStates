@@ -4,4 +4,7 @@
     <Project Path="src/VisualStates.Runtime/VisualStates.Runtime.csproj" />
     <Project Path="src/VisualStates/VisualStates.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VisualStates.Tests/VisualStates.Tests.csproj" />
+  </Folder>
 </Solution>
